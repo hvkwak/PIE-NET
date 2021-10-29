@@ -74,7 +74,7 @@ def log_string(out_str):
     print(out_str)
 
 def get_learning_rate(batch):
-    learning_rate = tf.compat.v1.train.exponential_decay(
+    learning_rate = tf.train.exponential_decay(
                         BASE_LEARNING_RATE,  # Base learning rate.
                         batch * BATCH_SIZE,  # Current index into the dataset.
                         DECAY_STEP,          # Decay step.
@@ -84,7 +84,7 @@ def get_learning_rate(batch):
     return learning_rate        
 
 def get_learning_rate_stage_2(batch,base_learning_rate):
-    learning_rate = tf.compat.v1.train.exponential_decay(
+    learning_rate = tf.train.exponential_decay(
                         base_learning_rate,  # Base learning rate.
                         batch * BATCH_SIZE,  # Current index into the dataset.
                         DECAY_STEP,          # Decay step.
@@ -94,7 +94,7 @@ def get_learning_rate_stage_2(batch,base_learning_rate):
     return learning_rate        
 
 def get_bn_decay(batch):
-    bn_momentum = tf.compat.v1.train.exponential_decay(
+    bn_momentum = tf.train.exponential_decay(
                       BN_INIT_DECAY,
                       batch*BATCH_SIZE,
                       BN_DECAY_DECAY_STEP,
@@ -109,24 +109,24 @@ def train():
             if STAGE==1:
                 print('stage_1')
                 pointclouds_pl,labels_key_p,labels_corner_p = MODEL.placeholder_inputs_stage_1(BATCH_SIZE,NUM_POINT)
-                is_training_pl = tf.compat.v1.placeholder(tf.bool, shape=())
+                is_training_pl = tf.placeholder(tf.bool, shape=())
                 # Note the global_step=batch parameter to minimize. 
                 # That tells the optimizer to helpfully increment the 'batch' parameter for you every time it trains.
                 batch_stage_1 = tf.Variable(0,name='stage1/batch')
                 bn_decay = get_bn_decay(batch_stage_1)
-                tf.compat.v1.summary.scalar('bn_decay', bn_decay)
+                tf.summary.scalar('bn_decay', bn_decay)
                 print("--- Get model and loss")
                 # Get model and loss 
                 end_points,dof_feat,simmat_feat = MODEL.get_feature(pointclouds_pl, is_training_pl,STAGE,bn_decay=bn_decay)
                 pred_labels_key_p,pred_labels_corner_p = MODEL.get_stage_1(dof_feat,simmat_feat, is_training_pl,bn_decay=bn_decay)
                 task_1_loss,task_1_recall,task_1_acc,task_1_1_loss,task_1_1_recall,task_1_1_acc, \
                                     loss = MODEL.get_stage_1_loss(pred_labels_key_p,pred_labels_corner_p, labels_key_p,labels_corner_p)
-                tf.compat.v1.summary.scalar('labels_key_p_loss', task_1_loss)
-                tf.compat.v1.summary.scalar('labels_key_p_recall', task_1_recall)
-                tf.compat.v1.summary.scalar('labels_key_p_acc', task_1_acc)                
-                tf.compat.v1.summary.scalar('labels_corner_p_loss', task_1_1_loss)
-                tf.compat.v1.summary.scalar('labels_corner_p_recall', task_1_1_recall)
-                tf.compat.v1.summary.scalar('labels_corner_p_acc', task_1_1_acc)
+                tf.summary.scalar('labels_key_p_loss', task_1_loss)
+                tf.summary.scalar('labels_key_p_recall', task_1_recall)
+                tf.summary.scalar('labels_key_p_acc', task_1_acc)                
+                tf.summary.scalar('labels_corner_p_loss', task_1_1_loss)
+                tf.summary.scalar('labels_corner_p_recall', task_1_1_recall)
+                tf.summary.scalar('labels_corner_p_acc', task_1_1_acc)
                 #tf.summary.scalar('labels_direction_loss', task_2_1_loss)
                 #tf.summary.scalar('labels_direction_acc', task_2_1_acc)
                 #tf.summary.scalar('regression_direction_loss', task_2_2_loss)
@@ -138,105 +138,104 @@ def train():
                 print("--- Get training operator")
                 # Get training operator
                 learning_rate = get_learning_rate(batch_stage_1)
-                tf.compat.v1.summary.scalar('learning_rate', learning_rate)
+                tf.summary.scalar('learning_rate', learning_rate)
                 if OPTIMIZER == 'momentum':
-                    optimizer = tf.compat.v1.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
+                    optimizer = tf.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
                 elif OPTIMIZER == 'adam':
-                    optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate)
+                    optimizer = tf.train.AdamOptimizer(learning_rate)
                 train_op = optimizer.minimize(loss, global_step=batch_stage_1)
             
                 # Add ops to save and restore all the variables.
-                saver = tf.compat.v1.train.Saver(max_to_keep=10)
+                saver = tf.train.Saver(max_to_keep=10)
             elif STAGE==2:
                 print('stage_2')
                 pointclouds_pl,proposal_nx_pl,dof_mask_pl,dof_score_pl= MODEL.placeholder_inputs_stage_2(BATCH_SIZE,NUM_POINT)
                 is_training_feature= False
-                is_training_pl = tf.compat.v1.placeholder(tf.bool, shape=())
+                is_training_pl = tf.placeholder(tf.bool, shape=())
                 # Note the global_step=batch parameter to minimize. 
                 # That tells the optimizer to helpfully increment the 'batch' parameter for you every time it trains.
                 batch_stage_2 = tf.Variable(0,name='stage2/batch_2')
                 bn_decay = get_bn_decay(batch_stage_2)
-                tf.compat.v1.summary.scalar('bn_decay', bn_decay)
+                tf.summary.scalar('bn_decay', bn_decay)
                 print("--- Get model and loss")
                 # Get model and loss 
                 end_points,dof_feat,simmat_feat = MODEL.get_feature(pointclouds_pl, is_training_feature,STAGE,bn_decay=bn_decay)
                 pred_dof_score,all_feat = MODEL.get_stage_2(dof_feat,simmat_feat,dof_mask_pl,proposal_nx_pl,is_training_pl,bn_decay=bn_decay)
                 loss = MODEL.get_stage_2_loss(pred_dof_score,dof_score_pl,dof_mask_pl)
-                tf.compat.v1.summary.scalar('loss', loss)
+                tf.summary.scalar('loss', loss)
                 print("--- Get training operator")
                 # Get training operator
                 learning_rate = get_learning_rate(batch_stage_2)
-                tf.compat.v1.summary.scalar('learning_rate', learning_rate)
+                tf.summary.scalar('learning_rate', learning_rate)
                 variables = tf.contrib.framework.get_variables_to_restore()
                 variables_to_resotre = [v for v in variables if v.name.split('/')[0]=='pointnet']
                 variables_to_train = [v for v in variables if v.name.split('/')[0]=='stage2']
                 if OPTIMIZER == 'momentum':
-                    optimizer = tf.compat.v1.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
+                    optimizer = tf.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
                 elif OPTIMIZER == 'adam':
-                    optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate)
+                    optimizer = tf.train.AdamOptimizer(learning_rate)
                 train_op = optimizer.minimize(loss, global_step=batch_stage_2,var_list = variables_to_train)
                 # Add ops to save and restore all the variables.
-                saver = tf.compat.v1.train.Saver(var_list = variables_to_resotre)
-                saver2 = tf.compat.v1.train.Saver(max_to_keep=100)
+                saver = tf.train.Saver(var_list = variables_to_resotre)
+                saver2 = tf.train.Saver(max_to_keep=100)
         # Create a session
-        config = tf.compat.v1.ConfigProto()
+        config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
         config.allow_soft_placement = True
         config.log_device_placement = False
-        sess = tf.compat.v1.Session(config=config)
+        sess = tf.Session(config=config)
         # Add summary writers
-        merged = tf.compat.v1.summary.merge_all()
-        train_writer = tf.compat.v1.summary.FileWriter(os.path.join(LOG_DIR, 'train'), sess.graph)
-        test_writer = tf.compat.v1.summary.FileWriter(os.path.join(LOG_DIR, 'test'), sess.graph)
+        merged = tf.summary.merge_all()
+        train_writer = tf.summary.FileWriter(os.path.join(LOG_DIR, 'train'), sess.graph)
+        test_writer = tf.summary.FileWriter(os.path.join(LOG_DIR, 'test'), sess.graph)
         
         
         # Init variables
         if STAGE == 1:
-            init = tf.compat.v1.global_variables_initializer()
+            init = tf.global_variables_initializer()
             sess.run(init)
         else:
-            init = tf.compat.v1.global_variables_initializer()
+            init = tf.global_variables_initializer()
             sess.run(init)
             saver.restore(sess,'./stage_1_log/model100.ckpt')
-
-        if STAGE==1:
+	if STAGE==1:
             ops = {'pointclouds_pl': pointclouds_pl,
-                'labels_key_p': labels_key_p,
-                'labels_corner_p': labels_corner_p,
-                #'labels_direction': labels_direction,
-                #'regression_direction': regression_direction,
-                #'regression_position': regression_position,
-                #'labels_type': labels_type,
-                #'simmat_pl': simmat_pl,
-                #'neg_simmat_pl': neg_simmat_pl,
-                'is_training_pl': is_training_pl,
-                'pred_labels_key_p': pred_labels_key_p,                   #  'pred_labels_edge_points'
-                'pred_labels_corner_p': pred_labels_corner_p, 
-                #'pred_labels_direction': pred_labels_direction,
-                #'pred_regression_direction': pred_regression_direction,   # 'pred_regression_normal'
-                #'pred_regression_position': pred_regression_position,
-                #'pred_labels_type': pred_labels_type,
-                #'pred_simmat': pred_simmat,
-                #'pred_conf': pred_conf_logits,
-                'task_1_loss': task_1_loss,
-                'task_1_recall':task_1_recall,
-                'task_1_acc': task_1_acc,               
-                'task_1_1_loss': task_1_1_loss,
-                'task_1_1_recall':task_1_1_recall,
-                'task_1_1_acc': task_1_1_acc, 
-                #'task_2_1_loss': task_2_1_loss,
-                #'task_2_1_acc': task_2_1_acc,
-                #'task_2_2_loss': task_2_2_loss,
-                #'task_3_loss': task_3_loss,
-                #'task_4_loss': task_4_loss,
-                #'task_4_acc': task_4_acc,
-                #'task_5_loss': task_5_loss,
-                #'task_6_loss': task_6_loss,
-                'loss': loss,
-                'train_op': train_op,
-                'merged': merged,
-                'step': batch_stage_1,
-                'end_points': end_points}
+               'labels_key_p': labels_key_p,
+               'labels_corner_p': labels_corner_p,
+               #'labels_direction': labels_direction,
+               #'regression_direction': regression_direction,
+               #'regression_position': regression_position,
+               #'labels_type': labels_type,
+               #'simmat_pl': simmat_pl,
+               #'neg_simmat_pl': neg_simmat_pl,
+               'is_training_pl': is_training_pl,
+               'pred_labels_key_p': pred_labels_key_p,                   #  'pred_labels_edge_points'
+               'pred_labels_corner_p': pred_labels_corner_p, 
+               #'pred_labels_direction': pred_labels_direction,
+               #'pred_regression_direction': pred_regression_direction,   # 'pred_regression_normal'
+               #'pred_regression_position': pred_regression_position,
+               #'pred_labels_type': pred_labels_type,
+               #'pred_simmat': pred_simmat,
+               #'pred_conf': pred_conf_logits,
+               'task_1_loss': task_1_loss,
+               'task_1_recall':task_1_recall,
+               'task_1_acc': task_1_acc,               
+               'task_1_1_loss': task_1_1_loss,
+               'task_1_1_recall':task_1_1_recall,
+               'task_1_1_acc': task_1_1_acc, 
+               #'task_2_1_loss': task_2_1_loss,
+               #'task_2_1_acc': task_2_1_acc,
+               #'task_2_2_loss': task_2_2_loss,
+               #'task_3_loss': task_3_loss,
+               #'task_4_loss': task_4_loss,
+               #'task_4_acc': task_4_acc,
+               #'task_5_loss': task_5_loss,
+               #'task_6_loss': task_6_loss,
+               'loss': loss,
+               'train_op': train_op,
+               'merged': merged,
+               'step': batch_stage_1,
+               'end_points': end_points}
             for epoch in range(MAX_EPOCH):
                 log_string('**** TRAIN EPOCH %03d ****' % (epoch))
                 sys.stdout.flush()
@@ -248,17 +247,17 @@ def train():
                     log_string("Model saved in file: %s" % save_path)
         elif STAGE==2:
             ops = {'pointclouds_pl': pointclouds_pl,
-                'proposal_nx_pl': proposal_nx_pl,
-                'dof_mask_pl': dof_mask_pl,
-                'dof_score_pl': dof_score_pl,
-                'pred_dof_score': pred_dof_score,
-                'is_training_pl': is_training_pl,
-                'loss': loss,
-                'train_op': train_op,
-                'merged': merged,
-                'step': batch_stage_2,
-                'all_feat':all_feat,
-                'end_points': end_points}
+               'proposal_nx_pl': proposal_nx_pl,
+               'dof_mask_pl': dof_mask_pl,
+               'dof_score_pl': dof_score_pl,
+               'pred_dof_score': pred_dof_score,
+               'is_training_pl': is_training_pl,
+               'loss': loss,
+               'train_op': train_op,
+               'merged': merged,
+               'step': batch_stage_2,
+               'all_feat':all_feat,
+               'end_points': end_points}
             for epoch in range(MAX_EPOCH):
                 log_string('**** TRAIN EPOCH %03d ****' % (epoch))
                 sys.stdout.flush()
