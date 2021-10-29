@@ -104,7 +104,7 @@ def pointnet_sa_module(xyz, points, npoint, radius, nsample, mlp, mlp2, group_al
             idx: (batch_size, npoint, nsample) int32 -- indices for local regions
     '''
     data_format = 'NCHW' if use_nchw else 'NHWC'
-    with tf.variable_scope(scope) as sc:
+    with tf.compat.v1.variable_scope(scope) as sc:
         # Sample and Grouping
         if group_all:
             nsample = xyz.get_shape()[1].value
@@ -113,42 +113,42 @@ def pointnet_sa_module(xyz, points, npoint, radius, nsample, mlp, mlp2, group_al
             new_xyz, new_points, idx, grouped_xyz = sample_and_group(npoint, radius, nsample, xyz, points, knn, use_xyz)
 
         # Point Feature Embedding
-        if use_nchw: new_points = tf.transpose(new_points, [0,3,1,2])
+        if use_nchw: new_points = tf.transpose(a=new_points, perm=[0,3,1,2])
         for i, num_out_channel in enumerate(mlp):
             new_points = tf_util.conv2d(new_points, num_out_channel, [1,1],
                                         padding='VALID', stride=[1,1],
                                         bn=bn, is_training=is_training,
                                         scope='conv%d'%(i), bn_decay=bn_decay,
                                         data_format=data_format) 
-        if use_nchw: new_points = tf.transpose(new_points, [0,2,3,1])
+        if use_nchw: new_points = tf.transpose(a=new_points, perm=[0,2,3,1])
 
         # Pooling in Local Regions
         if pooling=='max':
-            new_points = tf.reduce_max(new_points, axis=[2], keep_dims=True, name='maxpool')
+            new_points = tf.reduce_max(input_tensor=new_points, axis=[2], keepdims=True, name='maxpool')
         elif pooling=='avg':
-            new_points = tf.reduce_mean(new_points, axis=[2], keep_dims=True, name='avgpool')
+            new_points = tf.reduce_mean(input_tensor=new_points, axis=[2], keepdims=True, name='avgpool')
         elif pooling=='weighted_avg':
-            with tf.variable_scope('weighted_avg'):
-                dists = tf.norm(grouped_xyz,axis=-1,ord=2,keep_dims=True)
+            with tf.compat.v1.variable_scope('weighted_avg'):
+                dists = tf.norm(tensor=grouped_xyz,axis=-1,ord=2,keepdims=True)
                 exp_dists = tf.exp(-dists * 5)
-                weights = exp_dists/tf.reduce_sum(exp_dists,axis=2,keep_dims=True) # (batch_size, npoint, nsample, 1)
+                weights = exp_dists/tf.reduce_sum(input_tensor=exp_dists,axis=2,keepdims=True) # (batch_size, npoint, nsample, 1)
                 new_points *= weights # (batch_size, npoint, nsample, mlp[-1])
-                new_points = tf.reduce_sum(new_points, axis=2, keep_dims=True)
+                new_points = tf.reduce_sum(input_tensor=new_points, axis=2, keepdims=True)
         elif pooling=='max_and_avg':
-            max_points = tf.reduce_max(new_points, axis=[2], keep_dims=True, name='maxpool')
-            avg_points = tf.reduce_mean(new_points, axis=[2], keep_dims=True, name='avgpool')
+            max_points = tf.reduce_max(input_tensor=new_points, axis=[2], keepdims=True, name='maxpool')
+            avg_points = tf.reduce_mean(input_tensor=new_points, axis=[2], keepdims=True, name='avgpool')
             new_points = tf.concat([avg_points, max_points], axis=-1)
 
         # [Optional] Further Processing 
         if mlp2 is not None:
-            if use_nchw: new_points = tf.transpose(new_points, [0,3,1,2])
+            if use_nchw: new_points = tf.transpose(a=new_points, perm=[0,3,1,2])
             for i, num_out_channel in enumerate(mlp2):
                 new_points = tf_util.conv2d(new_points, num_out_channel, [1,1],
                                             padding='VALID', stride=[1,1],
                                             bn=bn, is_training=is_training,
                                             scope='conv_post_%d'%(i), bn_decay=bn_decay,
                                             data_format=data_format) 
-            if use_nchw: new_points = tf.transpose(new_points, [0,2,3,1])
+            if use_nchw: new_points = tf.transpose(a=new_points, perm=[0,2,3,1])
 
         new_points = tf.squeeze(new_points, [2]) # (batch_size, npoints, mlp2[-1])
         return new_xyz, new_points, idx
@@ -169,7 +169,7 @@ def pointnet_sa_module_msg(xyz, points, npoint, radius_list, nsample_list, mlp_l
             new_points: (batch_size, npoint, \sum_k{mlp[k][-1]}) TF tensor
     '''
     data_format = 'NCHW' if use_nchw else 'NHWC'
-    with tf.variable_scope(scope) as sc:
+    with tf.compat.v1.variable_scope(scope) as sc:
         new_xyz = gather_point(xyz, farthest_point_sample(npoint, xyz))
         new_points_list = []
         for i in range(len(radius_list)):
@@ -184,13 +184,13 @@ def pointnet_sa_module_msg(xyz, points, npoint, radius_list, nsample_list, mlp_l
                     grouped_points = tf.concat([grouped_points, grouped_xyz], axis=-1)
             else:
                 grouped_points = grouped_xyz
-            if use_nchw: grouped_points = tf.transpose(grouped_points, [0,3,1,2])
+            if use_nchw: grouped_points = tf.transpose(a=grouped_points, perm=[0,3,1,2])
             for j,num_out_channel in enumerate(mlp_list[i]):
                 grouped_points = tf_util.conv2d(grouped_points, num_out_channel, [1,1],
                                                 padding='VALID', stride=[1,1], bn=bn, is_training=is_training,
                                                 scope='conv%d_%d'%(i,j), bn_decay=bn_decay)
-            if use_nchw: grouped_points = tf.transpose(grouped_points, [0,2,3,1])
-            new_points = tf.reduce_max(grouped_points, axis=[2])
+            if use_nchw: grouped_points = tf.transpose(a=grouped_points, perm=[0,2,3,1])
+            new_points = tf.reduce_max(input_tensor=grouped_points, axis=[2])
             new_points_list.append(new_points)
         new_points_concat = tf.concat(new_points_list, axis=-1)
         return new_xyz, new_points_concat
@@ -207,10 +207,10 @@ def pointnet_fp_module(xyz1, xyz2, points1, points2, mlp, is_training, bn_decay,
         Return:
             new_points: (batch_size, ndataset1, mlp[-1]) TF tensor
     '''
-    with tf.variable_scope(scope) as sc:
+    with tf.compat.v1.variable_scope(scope) as sc:
         dist, idx = three_nn(xyz1, xyz2)
         dist = tf.maximum(dist, 1e-10)
-        norm = tf.reduce_sum((1.0/dist),axis=2,keep_dims=True)
+        norm = tf.reduce_sum(input_tensor=(1.0/dist),axis=2,keepdims=True)
         norm = tf.tile(norm,[1,1,3])
         weight = (1.0/dist) / norm
         interpolated_points = three_interpolate(points2, idx, weight)

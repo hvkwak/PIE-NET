@@ -9,7 +9,7 @@ import tf_util
 from pointnet_util import pointnet_sa_module, pointnet_fp_module
 
 def smooth_l1_dist(deltas, sigma2=2.0, name='smooth_l1_dist'):
-    with tf.name_scope(name=name) as scope:
+    with tf.compat.v1.name_scope(name=name) as scope:
         deltas_abs = tf.abs(deltas)
         smoothL1_sign = tf.cast(tf.less(deltas_abs, 1.0/sigma2), tf.float32)
         return tf.square(deltas) * 0.5 * sigma2 * smoothL1_sign + \
@@ -59,9 +59,9 @@ def get_feature(point_cloud, is_training,stage,bn_decay=None):
     return end_points,dof_feat,simmat_feat
 
 def placeholder_inputs_stage_1(batch_size,num_point):
-    pointclouds_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,3))  # input
-    labels_key_p = tf.placeholder(tf.int32,shape=(batch_size,num_point))  # edge points label 0/1
-    labels_corner_p = tf.placeholder(tf.int32,shape=(batch_size,num_point)) 
+    pointclouds_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))  # input
+    labels_key_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))  # edge points label 0/1
+    labels_corner_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point)) 
     #labels_direction = tf.placeholder(tf.int32,shape=(batch_size,num_point))
 #    regression_direction = tf.placeholder(tf.float32,shape=(batch_size,num_point,3))
 #    regression_position = tf.placeholder(tf.float32,shape=(batch_size,num_point,3))
@@ -120,25 +120,25 @@ def get_stage_1_loss(pred_labels_key_p,pred_labels_corner_p, \
     num_point = pred_labels_key_p.get_shape()[1].value
     mask = tf.cast(labels_key_p,tf.float32)
     neg_mask = tf.ones_like(mask)-mask
-    Np = tf.expand_dims(tf.reduce_sum(mask,axis=1),1)     
-    Ng = tf.expand_dims(tf.reduce_sum(neg_mask,axis=1),1)  
+    Np = tf.expand_dims(tf.reduce_sum(input_tensor=mask,axis=1),1)     
+    Ng = tf.expand_dims(tf.reduce_sum(input_tensor=neg_mask,axis=1),1)  
     all_mask = tf.ones_like(mask)
     #loss:task1
-    task_1_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_labels_key_p,labels = labels_key_p)*(mask*(Ng/Np)+1))
-    task_1_recall = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_key_p,axis=2,output_type = tf.int32),\
-                          labels_key_p),tf.float32)*mask,axis = 1)/tf.reduce_sum(mask,axis=1))
-    task_1_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_key_p,axis=2,output_type = tf.int32),\
+    task_1_loss = tf.reduce_mean(input_tensor=tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_labels_key_p,labels = labels_key_p)*(mask*(Ng/Np)+1))
+    task_1_recall = tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.cast(tf.equal(tf.argmax(input=pred_labels_key_p,axis=2,output_type = tf.int32),\
+                          labels_key_p),tf.float32)*mask,axis = 1)/tf.reduce_sum(input_tensor=mask,axis=1))
+    task_1_acc = tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.cast(tf.equal(tf.argmax(input=pred_labels_key_p,axis=2,output_type = tf.int32),\
                           labels_key_p),tf.float32),axis = 1)/num_point)
     
     #loss:task1_1
     mask_1_1 = tf.cast(labels_corner_p,tf.float32)
     neg_mask_1_1 = tf.ones_like(mask_1_1)-mask_1_1
-    Np_1_1 = tf.expand_dims(tf.reduce_sum(mask_1_1,axis=1),1)     
-    Ng_1_1 = tf.expand_dims(tf.reduce_sum(neg_mask_1_1,axis=1),1) 
-    task_1_1_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_labels_corner_p,labels = labels_corner_p)*(mask_1_1*(Ng_1_1/Np_1_1)+1))
-    task_1_1_recall = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_corner_p,axis=2,output_type = tf.int32),\
-                          labels_corner_p),tf.float32)*mask_1_1,axis = 1)/tf.reduce_sum(mask_1_1,axis=1))
-    task_1_1_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_corner_p,axis=2,output_type = tf.int32),\
+    Np_1_1 = tf.expand_dims(tf.reduce_sum(input_tensor=mask_1_1,axis=1),1)     
+    Ng_1_1 = tf.expand_dims(tf.reduce_sum(input_tensor=neg_mask_1_1,axis=1),1) 
+    task_1_1_loss = tf.reduce_mean(input_tensor=tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_labels_corner_p,labels = labels_corner_p)*(mask_1_1*(Ng_1_1/Np_1_1)+1))
+    task_1_1_recall = tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.cast(tf.equal(tf.argmax(input=pred_labels_corner_p,axis=2,output_type = tf.int32),\
+                          labels_corner_p),tf.float32)*mask_1_1,axis = 1)/tf.reduce_sum(input_tensor=mask_1_1,axis=1))
+    task_1_1_acc = tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.cast(tf.equal(tf.argmax(input=pred_labels_corner_p,axis=2,output_type = tf.int32),\
                           labels_corner_p),tf.float32),axis = 1)/num_point)
     
 #    #loss:task2_1
@@ -181,16 +181,16 @@ def get_stage_1_loss(pred_labels_key_p,pred_labels_corner_p, \
 #    loss = task_1_loss*w1 + task_2_1_loss*w2_1 + task_2_2_loss*w2_2 + task_3_loss*w3 + task_4_loss*w4 + task_5_loss*w5 + task_6_loss*w6
     loss = task_1_loss*w1 + task_1_1_loss*w1_1
 
-    tf.summary.scalar('all loss', loss)
-    tf.add_to_collection('losses', loss)
+    tf.compat.v1.summary.scalar('all loss', loss)
+    tf.compat.v1.add_to_collection('losses', loss)
 #    return task_1_loss,task_1_recall,task_1_acc,task_2_1_loss,task_2_1_acc,task_2_2_loss,task_3_loss,task_4_loss,task_4_acc,task_5_loss,task_6_loss,loss
     return task_1_loss,task_1_recall,task_1_acc,task_1_1_loss,task_1_1_recall,task_1_1_acc,loss
 
 def placeholder_inputs_stage_2(batch_size,num_point):
-    pointclouds_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,6))
-    proposal_nx_pl = tf.placeholder(tf.int32,shape=(batch_size,num_point))
-    dof_mask_pl = tf.placeholder(tf.int32,shape=(batch_size,num_point))
-    dof_score_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point))
+    pointclouds_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,6))
+    proposal_nx_pl = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))
+    dof_mask_pl = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))
+    dof_score_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point))
     return pointclouds_pl,proposal_nx_pl,dof_mask_pl,dof_score_pl
 
 def get_stage_2(dof_feat,simmat_feat,dof_mask_pl,proposal_nx_pl,is_training,bn_decay=None):
@@ -200,9 +200,9 @@ def get_stage_2(dof_feat,simmat_feat,dof_mask_pl,proposal_nx_pl,is_training,bn_d
     proposal_nx_pl = tf.expand_dims(proposal_nx_pl,axis = -1)
     proposal_nx_pl = tf.cast(tf.tile(proposal_nx_pl,[1,1,512]),tf.float32)
     simmat_feat_mul = simmat_feat * proposal_nx_pl
-    simmat_feat_reduce = tf.reduce_max(simmat_feat_mul,axis=1)
+    simmat_feat_reduce = tf.reduce_max(input_tensor=simmat_feat_mul,axis=1)
     simmat_feat_expand = tf.tile(tf.expand_dims(simmat_feat_reduce,axis=1),[1,4096,1])
-    simmat_feat_all = tf.reduce_max(simmat_feat,axis=1)
+    simmat_feat_all = tf.reduce_max(input_tensor=simmat_feat,axis=1)
     simmat_feat_all = tf.tile(tf.expand_dims(simmat_feat_all,axis=1),[1,4096,1])
     all_feat = tf.concat([dof_feat,simmat_feat_expand],axis = 2)
     dof_mask_pl = tf.expand_dims(dof_mask_pl,axis =-1)
@@ -221,6 +221,6 @@ def get_stage_2_loss(pred_dof_score,dof_score_pl,dof_mask_pl):
     dof_mask_pl = tf.cast(dof_mask_pl,tf.float32)
     dof_score_pl = tf.expand_dims(dof_score_pl,-1)
     pred_dof_score = tf.expand_dims(pred_dof_score,axis = -1)
-    loss = tf.reduce_mean(tf.reduce_sum(tf.reduce_mean(smooth_l1_dist(pred_dof_score-dof_score_pl),axis=2)*dof_mask_pl, \
-                               axis = 1)/tf.reduce_sum(dof_mask_pl,axis=1))
+    loss = tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.reduce_mean(input_tensor=smooth_l1_dist(pred_dof_score-dof_score_pl),axis=2)*dof_mask_pl, \
+                               axis = 1)/tf.reduce_sum(input_tensor=dof_mask_pl,axis=1))
     return loss

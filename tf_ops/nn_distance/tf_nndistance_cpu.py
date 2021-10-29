@@ -17,17 +17,17 @@ def nn_distance_cpu(pc1, pc2):
     pc1_expand_tile = tf.tile(tf.expand_dims(pc1,2), [1,1,M,1])
     pc2_expand_tile = tf.tile(tf.expand_dims(pc2,1), [1,N,1,1])
     pc_diff = pc1_expand_tile - pc2_expand_tile # B,N,M,C
-    pc_dist = tf.reduce_sum(pc_diff ** 2, axis=-1) # B,N,M
-    dist1 = tf.reduce_min(pc_dist, axis=2) # B,N
-    idx1 = tf.argmin(pc_dist, axis=2) # B,N
-    dist2 = tf.reduce_min(pc_dist, axis=1) # B,M
-    idx2 = tf.argmin(pc_dist, axis=1) # B,M
+    pc_dist = tf.reduce_sum(input_tensor=pc_diff ** 2, axis=-1) # B,N,M
+    dist1 = tf.reduce_min(input_tensor=pc_dist, axis=2) # B,N
+    idx1 = tf.argmin(input=pc_dist, axis=2) # B,N
+    dist2 = tf.reduce_min(input_tensor=pc_dist, axis=1) # B,M
+    idx2 = tf.argmin(input=pc_dist, axis=1) # B,M
     return dist1, idx1, dist2, idx2
 
 
 def verify_nn_distance_cup():
     np.random.seed(0)
-    sess = tf.Session()
+    sess = tf.compat.v1.Session()
     pc1arr = np.random.random((1,5,3))
     pc2arr = np.random.random((1,6,3))
     pc1 = tf.constant(pc1arr)

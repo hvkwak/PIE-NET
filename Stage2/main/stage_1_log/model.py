@@ -9,7 +9,7 @@ import tf_util
 from pointnet_util import pointnet_sa_module, pointnet_fp_module
 
 def smooth_l1_dist(deltas, sigma2=2.0, name='smooth_l1_dist'):
-    with tf.name_scope(name=name) as scope:
+    with tf.compat.v1.name_scope(name=name) as scope:
         deltas_abs = tf.abs(deltas)
         smoothL1_sign = tf.cast(tf.less(deltas_abs, 1.0/sigma2), tf.float32)
         return tf.square(deltas) * 0.5 * sigma2 * smoothL1_sign + \
@@ -19,16 +19,16 @@ def smooth_l1_dist(deltas, sigma2=2.0, name='smooth_l1_dist'):
 
 
 def placeholder_inputs_stage_1(batch_size,num_point,num_roi):
-    pointclouds_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,5))  
-    corner_pair = tf.placeholder(tf.int32,shape=(batch_size,num_roi,2))
-    label_1 = tf.placeholder(tf.int32,shape=(batch_size,num_roi))  
-    label_2 = tf.placeholder(tf.int32,shape=(batch_size,num_roi)) 
+    pointclouds_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,5))  
+    corner_pair = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_roi,2))
+    label_1 = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_roi))  
+    label_2 = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_roi)) 
     #label_3 = tf.placeholder(tf.int32,shape=(batch_size,num_roi))  
     #label_4 = tf.placeholder(tf.int32,shape=(batch_size,num_roi)) 
-    label_5 = tf.placeholder(tf.int32,shape=(batch_size,num_point)) 
-    label_6 = tf.placeholder(tf.int32,shape=(batch_size,num_point))
-    label_7 = tf.placeholder(tf.int32,shape=(batch_size,num_point)) 
-    label_8 = tf.placeholder(tf.int32,shape=(batch_size,num_point))  
+    label_5 = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point)) 
+    label_6 = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))
+    label_7 = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point)) 
+    label_8 = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))  
     #labels_direction = tf.placeholder(tf.int32,shape=(batch_size,num_point))
 #    regression_direction = tf.placeholder(tf.float32,shape=(batch_size,num_point,3))
 #    regression_position = tf.placeholder(tf.float32,shape=(batch_size,num_point,3))
@@ -136,14 +136,14 @@ def task_head(pc, pc_fea, num_category, mlp_list, mlp_list2, is_training, bn_dec
         probs: [B, NUM_ROIS, NUM_CATEGORY]
         #bbox_deltas: [B, NUM_ROIS, NUM_CATEGORY, (dz, dy, dx, log(dh), log(dw), log(dl))]
     '''
-    with tf.variable_scope(scope) as myscope:
+    with tf.compat.v1.variable_scope(scope) as myscope:
         num_rois = pc.get_shape()[1].value
         grouped_points = tf.concat((pc_fea, pc), -1)
         for i,num_out_channel in enumerate(mlp_list):
             grouped_points = tf_util.conv2d(grouped_points, num_out_channel, [1, 1],
                                             padding='VALID', stride=[1,1], bn=bn, is_training=is_training,
                                             scope='conv_prev_%d'%i, bn_decay=bn_decay)
-        new_points = tf.reduce_max(grouped_points, axis=2)
+        new_points = tf.reduce_max(input_tensor=grouped_points, axis=2)
         for i,num_out_channel in enumerate(mlp_list2):
             new_points = tf_util.conv1d(new_points, num_out_channel, 1,
                                         padding='VALID', stride=1, bn=bn, is_training=is_training,
@@ -208,13 +208,13 @@ def get_rpointnet_loss(class_logits, gt_class_ids):
     #loss = tf.multiply(loss, roi_valid_mask)
     num_batch = gt_class_ids.get_shape()[0].value
     num_roi = gt_class_ids.get_shape()[1].value
-    loss = tf.divide(tf.reduce_sum(loss), num_batch*num_roi)  #tf.reduce_sum(roi_valid_mask)+1e-8)
+    loss = tf.divide(tf.reduce_sum(input_tensor=loss), num_batch*num_roi)  #tf.reduce_sum(roi_valid_mask)+1e-8)
 	
     mask_pos = tf.cast(gt_class_ids,tf.float32)
-    recall = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(class_logits,axis=2,output_type = tf.int32),\
-                          gt_class_ids),tf.float32)*mask_pos,axis = 1)/tf.reduce_sum(mask_pos,axis=1))
+    recall = tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.cast(tf.equal(tf.argmax(input=class_logits,axis=2,output_type = tf.int32),\
+                          gt_class_ids),tf.float32)*mask_pos,axis = 1)/tf.reduce_sum(input_tensor=mask_pos,axis=1))
 						  
-    acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(class_logits,axis=2,output_type = tf.int32),\
+    acc = tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.cast(tf.equal(tf.argmax(input=class_logits,axis=2,output_type = tf.int32),\
                           gt_class_ids),tf.float32),axis = 1)/num_roi)					  
 
     return loss, recall, acc
@@ -229,22 +229,22 @@ def get_rpointnet_loss_1(class_logits, gt_class_ids):
     loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=gt_class_ids, logits=class_logits)
     num_batch = gt_class_ids.get_shape()[0].value
     num_roi = gt_class_ids.get_shape()[1].value
-    loss = tf.divide(tf.reduce_sum(loss), num_batch*num_roi)  #tf.reduce_sum(roi_valid_mask)+1e-8)
+    loss = tf.divide(tf.reduce_sum(input_tensor=loss), num_batch*num_roi)  #tf.reduce_sum(roi_valid_mask)+1e-8)
 
     batch_size = gt_class_ids.get_shape()[0].value
     num_point = gt_class_ids.get_shape()[1].value
     mask = tf.cast(gt_class_ids,tf.float32)
     neg_mask = tf.ones_like(mask)-mask
-    Np = tf.expand_dims(tf.reduce_sum(mask,axis=1),1)     
-    Ng = tf.expand_dims(tf.reduce_sum(neg_mask,axis=1),1)  
+    Np = tf.expand_dims(tf.reduce_sum(input_tensor=mask,axis=1),1)     
+    Ng = tf.expand_dims(tf.reduce_sum(input_tensor=neg_mask,axis=1),1)  
     all_mask = tf.ones_like(mask)
     #loss:task5
-    loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = class_logits,labels = gt_class_ids)*(mask*(Ng/Np)+1))	
+    loss = tf.reduce_mean(input_tensor=tf.nn.sparse_softmax_cross_entropy_with_logits(logits = class_logits,labels = gt_class_ids)*(mask*(Ng/Np)+1))	
     mask_pos = tf.cast(gt_class_ids,tf.float32)
-    recall = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(class_logits,axis=2,output_type = tf.int32),\
-                          gt_class_ids),tf.float32)*mask_pos,axis = 1)/tf.reduce_sum(mask_pos,axis=1))
+    recall = tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.cast(tf.equal(tf.argmax(input=class_logits,axis=2,output_type = tf.int32),\
+                          gt_class_ids),tf.float32)*mask_pos,axis = 1)/tf.reduce_sum(input_tensor=mask_pos,axis=1))
 						  
-    acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(class_logits,axis=2,output_type = tf.int32),\
+    acc = tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.cast(tf.equal(tf.argmax(input=class_logits,axis=2,output_type = tf.int32),\
                           gt_class_ids),tf.float32),axis = 1)/num_roi)					  
 
     return loss, recall, acc

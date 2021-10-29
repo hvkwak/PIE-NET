@@ -88,7 +88,7 @@ def log_string(out_str):
     print(out_str)
 
 def get_learning_rate(batch):
-    learning_rate = tf.train.exponential_decay(
+    learning_rate = tf.compat.v1.train.exponential_decay(
                         BASE_LEARNING_RATE,  # Base learning rate.
                         batch * BATCH_SIZE,  # Current index into the dataset.
                         DECAY_STEP,          # Decay step.
@@ -98,7 +98,7 @@ def get_learning_rate(batch):
     return learning_rate        
 
 def get_learning_rate_stage_2(batch,base_learning_rate):
-    learning_rate = tf.train.exponential_decay(
+    learning_rate = tf.compat.v1.train.exponential_decay(
                         base_learning_rate,  # Base learning rate.
                         batch * BATCH_SIZE,  # Current index into the dataset.
                         DECAY_STEP,          # Decay step.
@@ -108,7 +108,7 @@ def get_learning_rate_stage_2(batch,base_learning_rate):
     return learning_rate        
 
 def get_bn_decay(batch):
-    bn_momentum = tf.train.exponential_decay(
+    bn_momentum = tf.compat.v1.train.exponential_decay(
                       BN_INIT_DECAY,
                       batch*BATCH_SIZE,
                       BN_DECAY_DECAY_STEP,
@@ -128,10 +128,10 @@ def train():
                    closed_gt_valid_mask, closed_gt_pair_idx = MODEL.placeholder_inputs_stage_1(BATCH_SIZE,NUM_POINT, \
                                                                         NUM_OPEN_PAIR,NUM_POINT_PER_OPEN_PAIR,NUM_OPEN_GT_SAMPLE, \
                                                                         NUM_CLOSED_POINT, NUM_POINT_PER_CLOSED_POINT,NUM_CLOSED_GT_SAMPLE)
-                is_training_pl = tf.placeholder(tf.bool, shape=())
+                is_training_pl = tf.compat.v1.placeholder(tf.bool, shape=())
                 batch_stage_1 = tf.Variable(0,name='stage1/batch')
                 bn_decay = get_bn_decay(batch_stage_1)
-                tf.summary.scalar('bn_decay', bn_decay)
+                tf.compat.v1.summary.scalar('bn_decay', bn_decay)
                 print("--- Get model and loss")
                 # Get model and loss 
                 end_points,dof_feat,simmat_feat = MODEL.get_feature(pointclouds_pl, is_training_pl,STAGE,bn_decay=bn_decay)
@@ -155,55 +155,55 @@ def train():
                                         closed_gt_mask, closed_gt_type, closed_gt_res, closed_gt_sample_points, closed_gt_valid_mask, \
                                         open_ball_radius, open_ball_center, \
                                         closed_ball_radius, closed_ball_center)
-                tf.summary.scalar('labels_key_p_loss', task_1_loss)
-                tf.summary.scalar('labels_key_p_recall', task_1_recall)
-                tf.summary.scalar('labels_key_p_acc', task_1_acc)                
-                tf.summary.scalar('labels_corner_p_loss', task_1_1_loss)
-                tf.summary.scalar('labels_corner_p_recall', task_1_1_recall)
-                tf.summary.scalar('labels_corner_p_acc', task_1_1_acc)
+                tf.compat.v1.summary.scalar('labels_key_p_loss', task_1_loss)
+                tf.compat.v1.summary.scalar('labels_key_p_recall', task_1_recall)
+                tf.compat.v1.summary.scalar('labels_key_p_acc', task_1_acc)                
+                tf.compat.v1.summary.scalar('labels_corner_p_loss', task_1_1_loss)
+                tf.compat.v1.summary.scalar('labels_corner_p_recall', task_1_1_recall)
+                tf.compat.v1.summary.scalar('labels_corner_p_acc', task_1_1_acc)
                 
-                tf.summary.scalar('open_class_loss', open_class_loss)
-                tf.summary.scalar('open_res_loss', open_res_loss)
-                tf.summary.scalar('open_mask_loss', open_mask_loss)
+                tf.compat.v1.summary.scalar('open_class_loss', open_class_loss)
+                tf.compat.v1.summary.scalar('open_res_loss', open_res_loss)
+                tf.compat.v1.summary.scalar('open_mask_loss', open_mask_loss)
                 
-                tf.summary.scalar('closed_class_loss', closed_class_loss)
-                tf.summary.scalar('closed_res_loss', closed_res_loss)                
-                tf.summary.scalar('closed_mask_loss', closed_mask_loss)
+                tf.compat.v1.summary.scalar('closed_class_loss', closed_class_loss)
+                tf.compat.v1.summary.scalar('closed_res_loss', closed_res_loss)                
+                tf.compat.v1.summary.scalar('closed_mask_loss', closed_mask_loss)
                 
-                tf.summary.scalar('open_class_acc', open_class_acc)
-                tf.summary.scalar('open_mask_acc', open_mask_acc)                
-                tf.summary.scalar('closed_class_acc', closed_class_acc)
-                tf.summary.scalar('closed_mask_acc', closed_mask_acc)
+                tf.compat.v1.summary.scalar('open_class_acc', open_class_acc)
+                tf.compat.v1.summary.scalar('open_mask_acc', open_mask_acc)                
+                tf.compat.v1.summary.scalar('closed_class_acc', closed_class_acc)
+                tf.compat.v1.summary.scalar('closed_mask_acc', closed_mask_acc)
                 
-                tf.summary.scalar('open_restrcut_loss', open_restrcut_loss)
-                tf.summary.scalar('closed_restruct_loss', closed_restruct_loss)
+                tf.compat.v1.summary.scalar('open_restrcut_loss', open_restrcut_loss)
+                tf.compat.v1.summary.scalar('closed_restruct_loss', closed_restruct_loss)
                 
-                tf.summary.scalar('loss', loss)
+                tf.compat.v1.summary.scalar('loss', loss)
 
                 print("--- Get training operator")
                 # Get training operator
                 learning_rate = get_learning_rate(batch_stage_1)
-                tf.summary.scalar('learning_rate', learning_rate)
+                tf.compat.v1.summary.scalar('learning_rate', learning_rate)
                 if OPTIMIZER == 'momentum':
-                    optimizer = tf.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
+                    optimizer = tf.compat.v1.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
                 elif OPTIMIZER == 'adam':
-                    optimizer = tf.train.AdamOptimizer(learning_rate)
+                    optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate)
                 train_op = optimizer.minimize(loss, global_step=batch_stage_1)
             
                 # Add ops to save and restore all the variables.
-                saver = tf.train.Saver(max_to_keep=10)
+                saver = tf.compat.v1.train.Saver(max_to_keep=10)
             
                 
         # Create a session
-        config = tf.ConfigProto()
+        config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
         config.allow_soft_placement = True
         config.log_device_placement = False
-        sess = tf.Session(config=config)
+        sess = tf.compat.v1.Session(config=config)
         # Add summary writers
-        merged = tf.summary.merge_all()
-        train_writer = tf.summary.FileWriter(os.path.join(LOG_DIR, 'train'), sess.graph)
-        test_writer = tf.summary.FileWriter(os.path.join(LOG_DIR, 'test'), sess.graph)
+        merged = tf.compat.v1.summary.merge_all()
+        train_writer = tf.compat.v1.summary.FileWriter(os.path.join(LOG_DIR, 'train'), sess.graph)
+        test_writer = tf.compat.v1.summary.FileWriter(os.path.join(LOG_DIR, 'test'), sess.graph)
 
         # Init variables
         model_path = './'+LOG_DIR + '/model100.ckpt'
