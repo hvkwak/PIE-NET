@@ -67,6 +67,8 @@ BN_DECAY_CLIP = 0.99
 
 HOSTNAME = socket.gethostname()
 
+print("is this?")
+
 def log_string(out_str):
     LOG_FOUT.write(out_str+'\n')
     LOG_FOUT.flush()
