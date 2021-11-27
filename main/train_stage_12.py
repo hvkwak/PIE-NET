@@ -28,7 +28,7 @@ parser.add_argument('--stage_1_log_dir', default='stage_1_log', help='Log dir [d
 parser.add_argument('--stage_2_log_dir', default='stage_2_log', help='Log dir [default: log]')
 parser.add_argument('--num_point', type=int, default=8096, help='Point Number [default: 2048]')
 parser.add_argument('--max_epoch', type=int, default=101, help='Epoch to run [default: 201]')
-parser.add_argument('--batch_size', type=int, default=1, help='Batch Size during training [default: 32]')
+parser.add_argument('--batch_size', type=int, default=32, help='Batch Size during training [default: 32]')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Initial learning rate [default: 0.001]')
 parser.add_argument('--momentum', type=float, default=0.9, help='Initial learning rate [default: 0.9]')
 parser.add_argument('--optimizer', default='adam', help='adam or momentum [default: adam]')
@@ -74,7 +74,7 @@ def log_string(out_str):
     print(out_str)
 
 def get_learning_rate(batch):
-    learning_rate = tf.train.exponential_decay(
+    learning_rate = tf.compat.v1.train.exponential_decay(
                         BASE_LEARNING_RATE,  # Base learning rate.
                         batch * BATCH_SIZE,  # Current index into the dataset.
                         DECAY_STEP,          # Decay step.
@@ -84,7 +84,7 @@ def get_learning_rate(batch):
     return learning_rate        
 
 def get_learning_rate_stage_2(batch,base_learning_rate):
-    learning_rate = tf.train.exponential_decay(
+    learning_rate = tf.compat.v1.train.exponential_decay(
                         base_learning_rate,  # Base learning rate.
                         batch * BATCH_SIZE,  # Current index into the dataset.
                         DECAY_STEP,          # Decay step.
@@ -94,7 +94,7 @@ def get_learning_rate_stage_2(batch,base_learning_rate):
     return learning_rate        
 
 def get_bn_decay(batch):
-    bn_momentum = tf.train.exponential_decay(
+    bn_momentum = tf.compat.v1.train.exponential_decay(
                       BN_INIT_DECAY,
                       batch*BATCH_SIZE,
                       BN_DECAY_DECAY_STEP,
@@ -109,24 +109,24 @@ def train():
             if STAGE==1:
                 print('stage_1')
                 pointclouds_pl,labels_key_p,labels_corner_p = MODEL.placeholder_inputs_stage_1(BATCH_SIZE,NUM_POINT)
-                is_training_pl = tf.placeholder(tf.bool, shape=())
+                is_training_pl = tf.compat.v1.placeholder(tf.bool, shape=())
                 # Note the global_step=batch parameter to minimize. 
                 # That tells the optimizer to helpfully increment the 'batch' parameter for you every time it trains.
                 batch_stage_1 = tf.Variable(0,name='stage1/batch')
                 bn_decay = get_bn_decay(batch_stage_1)
-                tf.summary.scalar('bn_decay', bn_decay)
+                tf.compat.v1.summary.scalar('bn_decay', bn_decay)
                 print("--- Get model and loss")
                 # Get model and loss 
                 end_points,dof_feat,simmat_feat = MODEL.get_feature(pointclouds_pl, is_training_pl,STAGE,bn_decay=bn_decay)
-                pred_labels_key_p,pred_labels_corner_p = MODEL.get_stage_1(dof_feat,simmat_feat, is_training_pl,bn_decay=bn_decay)
+                pred_labels_key_p,pred_labels_corner_p = MODEL.get_stage_1(dof_feat,simmat_feat, is_training_pl,bn_decay=bn_decay) # binary classifier. Edge? (yes/no) Corner? (yes/no)
                 task_1_loss,task_1_recall,task_1_acc,task_1_1_loss,task_1_1_recall,task_1_1_acc, \
                                     loss = MODEL.get_stage_1_loss(pred_labels_key_p,pred_labels_corner_p, labels_key_p,labels_corner_p)
-                tf.summary.scalar('labels_key_p_loss', task_1_loss)
-                tf.summary.scalar('labels_key_p_recall', task_1_recall)
-                tf.summary.scalar('labels_key_p_acc', task_1_acc)                
-                tf.summary.scalar('labels_corner_p_loss', task_1_1_loss)
-                tf.summary.scalar('labels_corner_p_recall', task_1_1_recall)
-                tf.summary.scalar('labels_corner_p_acc', task_1_1_acc)
+                tf.compat.v1.summary.scalar('labels_key_p_loss', task_1_loss)
+                tf.compat.v1.summary.scalar('labels_key_p_recall', task_1_recall)
+                tf.compat.v1.summary.scalar('labels_key_p_acc', task_1_acc)                
+                tf.compat.v1.summary.scalar('labels_corner_p_loss', task_1_1_loss)
+                tf.compat.v1.summary.scalar('labels_corner_p_recall', task_1_1_recall)
+                tf.compat.v1.summary.scalar('labels_corner_p_acc', task_1_1_acc)
                 #tf.summary.scalar('labels_direction_loss', task_2_1_loss)
                 #tf.summary.scalar('labels_direction_acc', task_2_1_acc)
                 #tf.summary.scalar('regression_direction_loss', task_2_2_loss)
@@ -138,67 +138,68 @@ def train():
                 print("--- Get training operator")
                 # Get training operator
                 learning_rate = get_learning_rate(batch_stage_1)
-                tf.summary.scalar('learning_rate', learning_rate)
+                tf.compat.v1.summary.scalar('learning_rate', learning_rate)
                 if OPTIMIZER == 'momentum':
-                    optimizer = tf.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
+                    optimizer = tf.compat.v1.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
                 elif OPTIMIZER == 'adam':
-                    optimizer = tf.train.AdamOptimizer(learning_rate)
+                    optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate)
                 train_op = optimizer.minimize(loss, global_step=batch_stage_1)
-            
+                
                 # Add ops to save and restore all the variables.
-                saver = tf.train.Saver(max_to_keep=10)
+                saver = tf.compat.v1.train.Saver(max_to_keep=10)
             elif STAGE==2:
                 print('stage_2')
                 pointclouds_pl,proposal_nx_pl,dof_mask_pl,dof_score_pl= MODEL.placeholder_inputs_stage_2(BATCH_SIZE,NUM_POINT)
-                is_training_feature= False
-                is_training_pl = tf.placeholder(tf.bool, shape=())
+                is_training_feature= tf.constant(False, dtype=tf.bool)
+                is_training_pl = tf.compat.v1.placeholder(tf.bool, shape=())
                 # Note the global_step=batch parameter to minimize. 
                 # That tells the optimizer to helpfully increment the 'batch' parameter for you every time it trains.
                 batch_stage_2 = tf.Variable(0,name='stage2/batch_2')
                 bn_decay = get_bn_decay(batch_stage_2)
-                tf.summary.scalar('bn_decay', bn_decay)
+                tf.compat.v1.summary.scalar('bn_decay', bn_decay)
                 print("--- Get model and loss")
                 # Get model and loss 
                 end_points,dof_feat,simmat_feat = MODEL.get_feature(pointclouds_pl, is_training_feature,STAGE,bn_decay=bn_decay)
                 pred_dof_score,all_feat = MODEL.get_stage_2(dof_feat,simmat_feat,dof_mask_pl,proposal_nx_pl,is_training_pl,bn_decay=bn_decay)
                 loss = MODEL.get_stage_2_loss(pred_dof_score,dof_score_pl,dof_mask_pl)
-                tf.summary.scalar('loss', loss)
+                tf.compat.v1.summary.scalar('loss', loss)
                 print("--- Get training operator")
                 # Get training operator
                 learning_rate = get_learning_rate(batch_stage_2)
-                tf.summary.scalar('learning_rate', learning_rate)
+                tf.compat.v1.summary.scalar('learning_rate', learning_rate)
                 variables = tf.contrib.framework.get_variables_to_restore()
                 variables_to_resotre = [v for v in variables if v.name.split('/')[0]=='pointnet']
                 variables_to_train = [v for v in variables if v.name.split('/')[0]=='stage2']
                 if OPTIMIZER == 'momentum':
-                    optimizer = tf.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
+                    optimizer = tf.compat.v1.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
                 elif OPTIMIZER == 'adam':
-                    optimizer = tf.train.AdamOptimizer(learning_rate)
+                    optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate)
                 train_op = optimizer.minimize(loss, global_step=batch_stage_2,var_list = variables_to_train)
                 # Add ops to save and restore all the variables.
-                saver = tf.train.Saver(var_list = variables_to_resotre)
-                saver2 = tf.train.Saver(max_to_keep=100)
+                saver = tf.compat.v1.train.Saver(var_list = variables_to_resotre)
+                saver2 = tf.compat.v1.train.Saver(max_to_keep=100)
         # Create a session
-        config = tf.ConfigProto()
+        config = tf.compat.v1.ConfigProto()
         config.gpu_options.allow_growth = True
         config.allow_soft_placement = True
         config.log_device_placement = False
-        sess = tf.Session(config=config)
+        sess = tf.compat.v1.Session(config=config)
         # Add summary writers
-        merged = tf.summary.merge_all()
-        train_writer = tf.summary.FileWriter(os.path.join(LOG_DIR, 'train'), sess.graph)
-        test_writer = tf.summary.FileWriter(os.path.join(LOG_DIR, 'test'), sess.graph)
+        merged = tf.compat.v1.summary.merge_all()
+        train_writer = tf.compat.v1.summary.FileWriter(os.path.join(LOG_DIR, 'train'), sess.graph)
+        test_writer = tf.compat.v1.summary.FileWriter(os.path.join(LOG_DIR, 'test'), sess.graph)
         
         
         # Init variables
         if STAGE == 1:
-            init = tf.global_variables_initializer()
+            init = tf.compat.v1.global_variables_initializer()
             sess.run(init)
         else:
-            init = tf.global_variables_initializer()
+            init = tf.compat.v1.global_variables_initializer()
             sess.run(init)
-            saver.restore(sess,'./stage_1_log/model100.ckpt')
-	if STAGE==1:
+            saver.restore(sess, BASE_DIR+'/stage_1_log/model100.ckpt')
+        
+        if STAGE==1:
             ops = {'pointclouds_pl': pointclouds_pl,
                'labels_key_p': labels_key_p,
                'labels_corner_p': labels_corner_p,
@@ -272,15 +273,15 @@ def train():
 def train_one_epoch_stage_1(sess, ops, train_writer):
     is_training = True
     permutation = np.random.permutation(32)
-    for i in range(len(permutation)/4):
-        load_data_start_time = time.time();
-        loadpath = './train_data/'+str(permutation[i*4]+1)+'.mat'   # change training data path
+    for i in range(len(permutation)//4):
+        load_data_start_time = time.time()
+        loadpath = BASE_DIR + '/train_data/'+str(permutation[i*4]+1)+'.mat'   # change training data path
         train_data = sio.loadmat(loadpath)['Training_data']
         load_data_duration = time.time() - load_data_start_time
         log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
         for j in range(3):
-            temp_load_data_start_time = time.time();
-            temp_loadpath = './train_data/'+str(permutation[i*4+j+1]+1)+'.mat'      # change training data path
+            temp_load_data_start_time = time.time()
+            temp_loadpath = BASE_DIR + '/train_data/'+str(permutation[i*4+j+1]+1)+'.mat'      # change training data path
             temp_train_data = sio.loadmat(temp_loadpath)['Training_data']
             temp_load_data_duration = time.time() - temp_load_data_start_time
             log_string('\t%s: %s load time: %f' % (datetime.now(),temp_loadpath,temp_load_data_duration))
@@ -411,14 +412,14 @@ def train_one_epoch_stage_2(sess, ops, train_writer):
     is_training = True
     permutation = np.random.permutation(328)
     for i in range(len(permutation)/4):
-        load_data_start_time = time.time();
-        loadpath = './train_data_stage_2/train_stage_2_data_'+str(permutation[i*4]+1)+'.mat'
+        load_data_start_time = time.time()
+        loadpath = BASE_DIR + '/train_data_stage_2/train_stage_2_data_'+str(permutation[i*4]+1)+'.mat'
         train_data = sio.loadmat(loadpath)['Training_data']
         load_data_duration = time.time() - load_data_start_time
         log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
         for j in range(3):
-            temp_load_data_start_time = time.time();
-            temp_loadpath = './train_data_stage_2/train_stage_2_data_'+str(permutation[i*4+j+1]+1)+'.mat'
+            temp_load_data_start_time = time.time()
+            temp_loadpath = BASE_DIR + '/train_data_stage_2/train_stage_2_data_'+str(permutation[i*4+j+1]+1)+'.mat'
             temp_train_data = sio.loadmat(temp_loadpath)['Training_data']
             temp_load_data_duration = time.time() - temp_load_data_start_time
             log_string('\t%s: %s load time: %f' % (datetime.now(),temp_loadpath,temp_load_data_duration))
