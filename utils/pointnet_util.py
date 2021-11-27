@@ -104,10 +104,10 @@ def pointnet_sa_module(xyz, points, npoint, radius, nsample, mlp, mlp2, group_al
             idx: (batch_size, npoint, nsample) int32 -- indices for local regions
     '''
     data_format = 'NCHW' if use_nchw else 'NHWC'
-    with tf.variable_scope(scope) as sc:
+    with tf.compat.v1.variable_scope(scope) as sc:
         # Sample and Grouping
         if group_all:
-            nsample = xyz.get_shape()[1].value
+            nsample = xyz.get_shape()[1]
             new_xyz, new_points, idx, grouped_xyz = sample_and_group_all(xyz, points, use_xyz)
         else:
             new_xyz, new_points, idx, grouped_xyz = sample_and_group(npoint, radius, nsample, xyz, points, knn, use_xyz)
@@ -124,9 +124,9 @@ def pointnet_sa_module(xyz, points, npoint, radius, nsample, mlp, mlp2, group_al
 
         # Pooling in Local Regions
         if pooling=='max':
-            new_points = tf.reduce_max(new_points, axis=[2], keep_dims=True, name='maxpool')
+            new_points = tf.reduce_max(input_tensor = new_points, axis=[2], keepdims=True, name='maxpool')
         elif pooling=='avg':
-            new_points = tf.reduce_mean(new_points, axis=[2], keep_dims=True, name='avgpool')
+            new_points = tf.reduce_mean(new_points, axis=[2], keepdims=True, name='avgpool')
         elif pooling=='weighted_avg':
             with tf.variable_scope('weighted_avg'):
                 dists = tf.norm(grouped_xyz,axis=-1,ord=2,keep_dims=True)
@@ -207,10 +207,10 @@ def pointnet_fp_module(xyz1, xyz2, points1, points2, mlp, is_training, bn_decay,
         Return:
             new_points: (batch_size, ndataset1, mlp[-1]) TF tensor
     '''
-    with tf.variable_scope(scope) as sc:
+    with tf.compat.v1.variable_scope(scope) as sc:
         dist, idx = three_nn(xyz1, xyz2)
         dist = tf.maximum(dist, 1e-10)
-        norm = tf.reduce_sum((1.0/dist),axis=2,keep_dims=True)
+        norm = tf.reduce_sum((1.0/dist),axis=2,keepdims=True)
         norm = tf.tile(norm,[1,1,3])
         weight = (1.0/dist) / norm
         interpolated_points = three_interpolate(points2, idx, weight)

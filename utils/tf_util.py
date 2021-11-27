@@ -6,6 +6,8 @@ Date: November 2017
 
 import numpy as np
 import tensorflow as tf
+from batch_norm_util import bn_layer_top
+
 
 def _variable_on_cpu(name, shape, initializer, use_fp16=False):
   """Helper to create a Variable stored on CPU memory.
@@ -18,7 +20,7 @@ def _variable_on_cpu(name, shape, initializer, use_fp16=False):
   """
   with tf.device("/cpu:0"):
     dtype = tf.float16 if use_fp16 else tf.float32
-    var = tf.get_variable(name, shape, initializer=initializer, dtype=dtype)
+    var = tf.compat.v1.get_variable(name, shape, initializer=initializer, dtype=dtype)
   return var
 
 def _variable_with_weight_decay(name, shape, stddev, wd, use_xavier=True):
@@ -39,9 +41,9 @@ def _variable_with_weight_decay(name, shape, stddev, wd, use_xavier=True):
     Variable Tensor
   """
   if use_xavier:
-    initializer = tf.contrib.layers.xavier_initializer()
+    initializer = tf.compat.v1.keras.initializers.VarianceScaling(scale=1.0, mode="fan_avg", distribution="uniform")
   else:
-    initializer = tf.truncated_normal_initializer(stddev=stddev)
+    initializer = tf.compat.v1.truncated_normal_initializer(stddev=stddev)
   var = _variable_on_cpu(name, shape, initializer)
   if wd is not None:
     weight_decay = tf.multiply(tf.nn.l2_loss(var), wd, name='weight_loss')
@@ -84,12 +86,12 @@ def conv1d(inputs,
   Returns:
     Variable tensor
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
     assert(data_format=='NHWC' or data_format=='NCHW')
     if data_format == 'NHWC':
-      num_in_channels = inputs.get_shape()[-1].value
+      num_in_channels = inputs.get_shape()[-1]
     elif data_format=='NCHW':
-      num_in_channels = inputs.get_shape()[1].value
+      num_in_channels = inputs.get_shape()[1]
     kernel_shape = [kernel_size,
                     num_in_channels, num_output_channels]
     kernel = _variable_with_weight_decay('weights',
@@ -152,13 +154,13 @@ def conv2d(inputs,
   Returns:
     Variable tensor
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
       kernel_h, kernel_w = kernel_size
       assert(data_format=='NHWC' or data_format=='NCHW')
       if data_format == 'NHWC':
-        num_in_channels = inputs.get_shape()[-1].value
+        num_in_channels = inputs.get_shape()[-1]
       elif data_format=='NCHW':
-        num_in_channels = inputs.get_shape()[1].value
+        num_in_channels = inputs.get_shape()[1]
       kernel_shape = [kernel_h, kernel_w,
                       num_in_channels, num_output_channels]
       kernel = _variable_with_weight_decay('weights',
@@ -222,7 +224,7 @@ def conv2d_transpose(inputs,
   """
   with tf.variable_scope(scope) as sc:
       kernel_h, kernel_w = kernel_size
-      num_in_channels = inputs.get_shape()[-1].value
+      num_in_channels = inputs.get_shape()[-1]
       kernel_shape = [kernel_h, kernel_w,
                       num_output_channels, num_in_channels] # reversed to conv2d
       kernel = _variable_with_weight_decay('weights',
@@ -241,9 +243,9 @@ def conv2d_transpose(inputs,
           return dim_size
 
       # caculate output shape
-      batch_size = inputs.get_shape()[0].value
-      height = inputs.get_shape()[1].value
-      width = inputs.get_shape()[2].value
+      batch_size = inputs.get_shape()[0]
+      height = inputs.get_shape()[1]
+      width = inputs.get_shape()[2]
       out_height = get_deconv_dim(height, stride_h, kernel_h, padding)
       out_width = get_deconv_dim(width, stride_w, kernel_w, padding)
       output_shape = [batch_size, out_height, out_width, num_output_channels]
@@ -300,7 +302,7 @@ def conv3d(inputs,
   """
   with tf.variable_scope(scope) as sc:
     kernel_d, kernel_h, kernel_w = kernel_size
-    num_in_channels = inputs.get_shape()[-1].value
+    num_in_channels = inputs.get_shape()[-1]
     kernel_shape = [kernel_d, kernel_h, kernel_w,
                     num_in_channels, num_output_channels]
     kernel = _variable_with_weight_decay('weights',
@@ -344,7 +346,7 @@ def fully_connected(inputs,
     Variable tensor of size B x num_outputs.
   """
   with tf.variable_scope(scope) as sc:
-    num_input_units = inputs.get_shape()[-1].value
+    num_input_units = inputs.get_shape()[-1]
     weights = _variable_with_weight_decay('weights',
                                           shape=[num_input_units, num_outputs],
                                           use_xavier=use_xavier,
@@ -403,7 +405,7 @@ def avg_pool2d(inputs,
   Returns:
     Variable tensor
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
     kernel_h, kernel_w = kernel_size
     stride_h, stride_w = stride
     outputs = tf.nn.avg_pool(inputs,
@@ -429,7 +431,7 @@ def max_pool3d(inputs,
   Returns:
     Variable tensor
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
     kernel_d, kernel_h, kernel_w = kernel_size
     stride_d, stride_h, stride_w = stride
     outputs = tf.nn.max_pool3d(inputs,
@@ -454,7 +456,7 @@ def avg_pool3d(inputs,
   Returns:
     Variable tensor
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
     kernel_d, kernel_h, kernel_w = kernel_size
     stride_d, stride_h, stride_w = stride
     outputs = tf.nn.avg_pool3d(inputs,
@@ -479,7 +481,7 @@ def batch_norm_template_unused(inputs, is_training, scope, moments_dims, bn_deca
   Return:
       normed:        batch-normalized maps
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
     num_channels = inputs.get_shape()[-1].value
     beta = _variable_on_cpu(name='beta',shape=[num_channels],
                             initializer=tf.constant_initializer(0))
@@ -487,11 +489,11 @@ def batch_norm_template_unused(inputs, is_training, scope, moments_dims, bn_deca
                             initializer=tf.constant_initializer(1.0))
     batch_mean, batch_var = tf.nn.moments(inputs, moments_dims, name='moments')
     decay = bn_decay if bn_decay is not None else 0.9
-    ema = tf.train.ExponentialMovingAverage(decay=decay)
+    ema = tf.compat.v1.train.ExponentialMovingAverage(decay=decay)
     # Operator that maintains moving averages of variables.
     # Need to set reuse=False, otherwise if reuse, will see moments_1/mean/ExponentialMovingAverage/ does not exist
     # https://github.com/shekkizh/WassersteinGAN.tensorflow/issues/3
-    with tf.variable_scope(tf.get_variable_scope(), reuse=False):
+    with tf.compat.v1.variable_scope(tf.get_variable_scope(), reuse=False):
         ema_apply_op = tf.cond(is_training,
                                lambda: ema.apply([batch_mean, batch_var]),
                                lambda: tf.no_op())
@@ -542,7 +544,8 @@ def batch_norm_for_fc(inputs, is_training, bn_decay, scope):
   Return:
       normed:      batch-normalized maps
   """
-  return batch_norm_template(inputs, is_training, scope, [0,], bn_decay)
+  #return batch_norm_template(inputs, is_training, scope, [0,], bn_decay)
+  return bn_layer_top(x=inputs, scope=scope, is_training=is_training, epsilon=0.001, decay=bn_decay)
 
 
 def batch_norm_for_conv1d(inputs, is_training, bn_decay, scope, data_format):
@@ -557,7 +560,8 @@ def batch_norm_for_conv1d(inputs, is_training, bn_decay, scope, data_format):
   Return:
       normed:      batch-normalized maps
   """
-  return batch_norm_template(inputs, is_training, scope, [0,1], bn_decay, data_format)
+  #return batch_norm_template(inputs, is_training, scope, [0,1], bn_decay, data_format)
+  return bn_layer_top(x=inputs, scope=scope, is_training=is_training, epsilon=0.001, decay=bn_decay)
 
 
 
@@ -574,7 +578,8 @@ def batch_norm_for_conv2d(inputs, is_training, bn_decay, scope, data_format):
   Return:
       normed:      batch-normalized maps
   """
-  return batch_norm_template(inputs, is_training, scope, [0,1,2], bn_decay, data_format)
+  #return batch_norm_template(inputs, is_training, scope, [0,1,2], bn_decay, data_format)
+  return bn_layer_top(x=inputs, scope=scope, is_training=is_training, epsilon=0.001, decay=bn_decay)
 
 
 def batch_norm_for_conv3d(inputs, is_training, bn_decay, scope):
@@ -588,7 +593,8 @@ def batch_norm_for_conv3d(inputs, is_training, bn_decay, scope):
   Return:
       normed:      batch-normalized maps
   """
-  return batch_norm_template(inputs, is_training, scope, [0,1,2,3], bn_decay)
+  #return batch_norm_template(inputs, is_training, scope, [0,1,2,3], bn_decay)
+  return bn_layer_top(x=inputs, scope=scope, is_training=is_training, epsilon=0.001, decay=bn_decay)
 
 
 def dropout(inputs,
@@ -608,7 +614,7 @@ def dropout(inputs,
   Returns:
     tensor variable
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
     outputs = tf.cond(is_training,
                       lambda: tf.nn.dropout(inputs, keep_prob, noise_shape),
                       lambda: inputs)

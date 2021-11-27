@@ -276,7 +276,7 @@ def eval_one_epoch_stage_1(sess, ops, train_writer):
     is_training = True
     dataset = ['./test_data/137.mat']
     for i in range(len(dataset)):
-        load_data_start_time = time.time();
+        load_data_start_time = time.time()
         train_data = sio.loadmat(dataset[i])['Training_data']
         load_data_duration = time.time() - load_data_start_time
         log_string('\t%s: %s load time: %f' % (datetime.now(),dataset[i],load_data_duration))
