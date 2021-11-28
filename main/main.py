@@ -250,8 +250,7 @@ def train():
                 # Get training operator 
                 grads = average_gradients(tower_grads)
                 train_op = optimizer.apply_gradients(grads, global_step=batch_stage_1)
-                
-
+            
 
                 train_op = optimizer.minimize(loss, global_step=batch_stage_1)
                 # Add ops to save and restore all the variables.
@@ -387,7 +386,7 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
     permutation = np.random.permutation(32)
     for i in range(len(permutation)//4):
         load_data_start_time = time.time()
-        loadpath = BASE_DIR + '/train_data/'+str(permutation[i*4]+1)+'.mat'   # change training data path
+        loadpath = BASE_DIR + '/train_data/new_train/'+str(permutation[i*4]+1)+'.mat'   # change training data path
         train_data = sio.loadmat(loadpath)['Training_data']
         load_data_duration = time.time() - load_data_start_time
         log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
