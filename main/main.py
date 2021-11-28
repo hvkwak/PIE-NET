@@ -12,6 +12,7 @@ import importlib
 import os
 import sys
 import time
+import fnmatch
 
 from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -216,19 +217,19 @@ def train():
                                                                                                 reg_edge_p_batch, \
                                                                                                 reg_corner_p_batch)
 
-                            tf.compat.v1.summary.scalar('edge_3_1_loss', edge_3_1_loss)
-                            tf.compat.v1.summary.scalar('edge_3_1_recall', edge_3_1_recall)
-                            tf.compat.v1.summary.scalar('edge_3_1_acc', edge_3_1_acc)                
-                            tf.compat.v1.summary.scalar('corner_3_1_loss', corner_3_1_loss)
-                            tf.compat.v1.summary.scalar('corner_3_1_recall', corner_3_1_recall)
-                            tf.compat.v1.summary.scalar('corner_3_1_acc', corner_3_1_acc)
-                            tf.compat.v1.summary.scalar('reg_edge_3_1_loss', reg_edge_3_1_loss)
-                            tf.compat.v1.summary.scalar('reg_corner_3_1_loss', reg_corner_3_1_loss)
+                            tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_loss' % (i), edge_3_1_loss)
+                            tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_recall' % (i), edge_3_1_recall)
+                            tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_acc' % (i), edge_3_1_acc)                
+                            tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_loss' % (i), corner_3_1_loss)
+                            tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_recall' % (i), corner_3_1_recall)
+                            tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_acc' % (i), corner_3_1_acc)
+                            tf.compat.v1.summary.scalar('%d_GPU_reg_edge_3_1_loss' % (i), reg_edge_3_1_loss)
+                            tf.compat.v1.summary.scalar('%d_GPU_reg_corner_3_1_loss' % (i), reg_corner_3_1_loss)
                             #tf.summary.scalar('labels_type_loss', task_4_loss)
                             #tf.summary.scalar('labels_type_acc', task_4_acc)
-                            tf.compat.v1.summary.scalar('loss', loss)
+                            tf.compat.v1.summary.scalar('%d_GPU_loss'% (i), loss)
 
-                            grads = optimizer.compute_gradients(loss)
+                            grads = optimizer.compute_gradients(loss) # here's where the loss and gradients are covered.
                             tower_grads.append(grads)
 
                             ## check this: 
@@ -240,7 +241,7 @@ def train():
                             pred_reg_corner_p_gpu.append(pred_reg_corner_p)
                             total_loss_gpu.append(loss)
                 
-                # Merge pred and losses from multiple GPUs
+                ## Merge pred and losses from multiple GPUs
                 pred_labels_edge_p = tf.concat(pred_labels_edge_p_gpu, 0)
                 pred_labels_corner_p = tf.concat(pred_labels_corner_p_gpu, 0)
                 pred_reg_edge_p = tf.concat(pred_reg_edge_p_gpu, 0)
@@ -250,9 +251,8 @@ def train():
                 # Get training operator 
                 grads = average_gradients(tower_grads)
                 train_op = optimizer.apply_gradients(grads, global_step=batch_stage_1)
-            
+                # train_op = optimizer.minimize(loss, global_step=batch_stage_1)
 
-                train_op = optimizer.minimize(loss, global_step=batch_stage_1)
                 # Add ops to save and restore all the variables.
                 saver = tf.compat.v1.train.Saver(max_to_keep=10)
 
@@ -383,16 +383,17 @@ def train():
 
 def train_one_epoch_stage_1(sess, ops, train_writer):
     is_training = True
+    matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/train_data/new_train/'), '*.mat')
     permutation = np.random.permutation(32)
     for i in range(len(permutation)//4):
         load_data_start_time = time.time()
-        loadpath = BASE_DIR + '/train_data/new_train/'+str(permutation[i*4]+1)+'.mat'   # change training data path
+        loadpath = BASE_DIR + '/train_data/new_train/'+matrices_names_list[permutation[i*4]]
         train_data = sio.loadmat(loadpath)['Training_data']
         load_data_duration = time.time() - load_data_start_time
         log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
         for j in range(3):
             temp_load_data_start_time = time.time()
-            temp_loadpath = BASE_DIR + '/train_data/'+str(permutation[i*4+j+1]+1)+'.mat'      # change training data path
+            temp_loadpath = BASE_DIR + '/train_data/new_train/'+matrices_names_list[permutation[i*4+j]]
             temp_train_data = sio.loadmat(temp_loadpath)['Training_data']
             temp_load_data_duration = time.time() - temp_load_data_start_time
             log_string('\t%s: %s load time: %f' % (datetime.now(),temp_loadpath,temp_load_data_duration))
