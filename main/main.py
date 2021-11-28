@@ -38,7 +38,7 @@ parser.add_argument('--momentum', type=float, default=0.9, help='Initial learnin
 parser.add_argument('--optimizer', default='adam', help='adam or momentum [default: adam]')
 parser.add_argument('--decay_step', type=int, default=200000, help='Decay step for lr decay [default: 200000]')
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
-parser.add_argument('--stage',type=int,default=2,help='network stage')
+parser.add_argument('--stage',type=int,default=1,help='network stage')
 FLAGS = parser.parse_args()
 
 EPOCH_CNT = 0
@@ -50,7 +50,7 @@ DEVICE_BATCH_SIZE = BATCH_SIZE // NUM_GPUS
 NUM_POINT = FLAGS.num_point
 MAX_EPOCH = FLAGS.max_epoch
 BASE_LEARNING_RATE = FLAGS.learning_rate
-GPU_INDEX = FLAGS.gpu
+#GPU_INDEX = FLAGS.gpu
 MOMENTUM = FLAGS.momentum
 OPTIMIZER = FLAGS.optimizer
 DECAY_STEP = FLAGS.decay_step
@@ -156,21 +156,20 @@ def train():
     with tf.Graph().as_default():
         with tf.device('/cpu:0'):
             if STAGE==1:
-
-                print('stage_1')
                 # remember that reg_{edge, corner}_p is label.
                 pointclouds_pl, labels_edge_p, labels_corner_p, reg_edge_p, reg_corner_p = MODEL.placeholder_inputs(BATCH_SIZE,NUM_POINT)
                 is_training_pl = tf.compat.v1.placeholder(tf.bool, shape=())
                 
                 # Note the global_step=batch parameter to minimize. 
                 # That tells the optimizer to helpfully increment the 'batch' parameter for you every time it trains.
-                batch_stage_1 = tf.Variable(0,name='stage1/batch')
-                bn_decay = get_bn_decay(batch_stage_1)
+                #batch_stage_1 = tf.Variable(0,name='stage1/batch')
+                batch = tf.compat.v1.get_variable('batch', [],initializer=tf.compat.v1.constant_initializer(0), trainable=False)
+                bn_decay = get_bn_decay(batch)
                 tf.compat.v1.summary.scalar('bn_decay', bn_decay)
 
                 print("--- Get training operator")
                 # Get training operator
-                learning_rate = get_learning_rate(batch_stage_1)
+                learning_rate = get_learning_rate(batch)
                 tf.compat.v1.summary.scalar('learning_rate', learning_rate)
                 if OPTIMIZER == 'momentum':
                     optimizer = tf.compat.v1.train.MomentumOptimizer(learning_rate, momentum=MOMENTUM)
@@ -184,6 +183,8 @@ def train():
                 # -------------------------------------------
                 # Allocating variables on CPU first will greatly accelerate multi-gpu training.
                 # Ref: https://github.com/kuza55/keras-extras/issues/21
+                MODEL.get_model(pointclouds_pl, is_training_pl,STAGE,bn_decay=bn_decay)
+
                 tower_grads = []
                 pred_labels_edge_p_gpu = []
                 pred_labels_corner_p_gpu = []
@@ -198,14 +199,14 @@ def train():
                             pc_batch = tf.slice(pointclouds_pl, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
 
                             ## check if dimension numbers are correct:
-                            labels_edge_p_batch = tf.slice(labels_edge_p,[i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
-                            labels_corner_p_batch = tf.slice(labels_corner_p,[i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
-                            reg_edge_p_batch = tf.slice(reg_edge_p, [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
-                            reg_corner_p_batch = tf.slice(reg_corner_p, [i*DEVICE_BATCH_SIZE], [DEVICE_BATCH_SIZE])
+                            labels_edge_p_batch = tf.slice(labels_edge_p,[i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
+                            labels_corner_p_batch = tf.slice(labels_corner_p,[i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
+                            reg_edge_p_batch = tf.slice(reg_edge_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
+                            reg_corner_p_batch = tf.slice(reg_corner_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
 
-                            end_points,dof_feat,simmat_feat = MODEL.get_feature(pc_batch, is_training_pl,STAGE,bn_decay=bn_decay)
-                            pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p  = MODEL.get_stage_1(dof_feat,simmat_feat, is_training_pl,bn_decay=bn_decay)
+                            pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model(pc_batch, is_training_pl,STAGE,bn_decay=bn_decay)
 
+                            
                             edge_3_1_loss,   edge_3_1_recall,   edge_3_1_acc,\
                             corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
                             reg_edge_3_1_loss, reg_corner_3_1_loss, loss = MODEL.get_stage_1_loss(pred_labels_edge_p, \
@@ -216,7 +217,16 @@ def train():
                                                                                                 pred_reg_corner_p, \
                                                                                                 reg_edge_p_batch, \
                                                                                                 reg_corner_p_batch)
-
+                            '''
+                            MODEL.get_stage_1_loss(pred_labels_edge_p, pred_labels_corner_p, labels_edge_p_batch, labels_corner_p_batch, \
+                                                    pred_reg_edge_p, pred_reg_corner_p, reg_edge_p_batch, reg_corner_p_batch)
+                            
+                            losses = tf.compat.v1.get_collection('losses', scope)
+                            total_loss = tf.add_n(losses, name='total_loss')
+                            for l in losses + [total_loss]:
+                                tf.compat.v1.summary.scalar(l.op.name, l)
+                            '''
+                            
                             tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_loss' % (i), edge_3_1_loss)
                             tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_recall' % (i), edge_3_1_recall)
                             tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_acc' % (i), edge_3_1_acc)                
@@ -228,6 +238,7 @@ def train():
                             #tf.summary.scalar('labels_type_loss', task_4_loss)
                             #tf.summary.scalar('labels_type_acc', task_4_acc)
                             tf.compat.v1.summary.scalar('%d_GPU_loss'% (i), loss)
+                            
 
                             grads = optimizer.compute_gradients(loss) # here's where the loss and gradients are covered.
                             tower_grads.append(grads)
@@ -250,7 +261,7 @@ def train():
                 
                 # Get training operator 
                 grads = average_gradients(tower_grads)
-                train_op = optimizer.apply_gradients(grads, global_step=batch_stage_1)
+                train_op = optimizer.apply_gradients(grads, global_step=batch)
                 # train_op = optimizer.minimize(loss, global_step=batch_stage_1)
 
                 # Add ops to save and restore all the variables.
@@ -336,18 +347,18 @@ def train():
                'corner_3_1_recall':corner_3_1_recall,
                'corner_3_1_acc': corner_3_1_acc, 
                'reg_edge_3_1_loss': reg_edge_3_1_loss,
-               'reg_edge_3_1_loss': reg_corner_3_1_loss,
+               'reg_corner_3_1_loss': reg_corner_3_1_loss,
                #'task_2_2_loss': task_2_2_loss,
                #'task_3_loss': task_3_loss,
                #'task_4_loss': task_4_loss,
                #'task_4_acc': task_4_acc,
                #'task_5_loss': task_5_loss,
                #'task_6_loss': task_6_loss,
-               'loss': loss,
+               'loss': total_loss,
                'train_op': train_op,
                'merged': merged,
-               'step': batch_stage_1,
-               'end_points': end_points}
+               'step': batch}
+               #'end_points': end_points
             for epoch in range(MAX_EPOCH):
                 log_string('**** TRAIN EPOCH %03d ****' % (epoch))
                 sys.stdout.flush()
@@ -434,12 +445,12 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
             #batch_neg_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
             for cnt in range(BATCH_SIZE):
                 tmp_data = data_cells[cnt]
-                batch_inputs[cnt,:,:] = tmp_data['down_sample_point'][0, 0]
-                batch_labels_edge_p[cnt,:] = np.squeeze(tmp_data['edge_points_label'][0,0])
-                batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data['corner_points_label'][0,0])
+                batch_inputs[cnt,:,:] = tmp_data[0,0]['down_sample_point']
+                batch_labels_edge_p[cnt,:] = np.squeeze(tmp_data[0,0]['edge_points_label'])
+                batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data[0,0]['corner_points_label'])
                 #batch_labels_direction[cnt,:] = np.squeeze(tmp_data['motion_direction_class'][0,0])
-                batch_regression_edge[cnt,:,:] = tmp_data['edge_points_residual_vector'][0,0]
-                batch_regression_corner[cnt,:,:] = tmp_data['corner_points_residual_vector'][0,0]
+                batch_regression_edge[cnt,:,:] = tmp_data[0,0]['edge_points_residual_vector']
+                batch_regression_corner[cnt,:,:] = tmp_data[0,0]['corner_points_residual_vector']
                 #batch_labels_type[cnt,:] = np.squeeze(tmp_data['motion_dof_type'][0,0])
                 #tmp_simmat = tmp_data['similar_matrix'][0,0]
                 #batch_simmat_pl[cnt,:,:] = tmp_simmat + tmp_simmat.T
@@ -447,7 +458,7 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
                 #tmp_neg_simmat = tmp_neg_simmat - np.eye(NUM_POINT) 
                 #batch_neg_simmat_pl[cnt,:,:] = tmp_neg_simmat
             feed_dict = {ops['pointclouds_pl']: batch_inputs,
-                         ops['labels_key_p']: batch_labels_edge_p,
+                         ops['labels_edge_p']: batch_labels_edge_p,
                          ops['labels_corner_p']: batch_labels_corner_p,
                          #ops['labels_direction']: batch_labels_direction,
                          ops['reg_edge_p']: batch_regression_edge,
@@ -513,14 +524,14 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
         sec_per_batch = process_duration/num_batch
         log_string('\t%s: step: %f loss: %f duration time %.3f (%.1f examples/sec; %.3f sec/batch)' \
            % (datetime.now(),step,total_loss,process_duration,examples_per_sec,sec_per_batch))
-        log_string('\t\tTraining Edge_3_1 Mean_loss: %f' % total_edge_3_1_loss)
-        log_string('\t\tTraining Edge_3_1 Accuracy: %f' % total_edge_3_1_acc)
-        log_string('\t\tTraining Edge_3_1 Recall: %f' % total_edge_3_1_recall)
-        log_string('\t\tTraining Corner_3_1 Mean_loss: %f' % total_corner_3_1_loss)
-        log_string('\t\tTraining Corner_3_1 1 Accuracy: %f' % total_corner_3_1_acc)
-        log_string('\t\tTraining Corner_3_1 1 Recall: %f' % total_corner_3_1_recall)
-        log_string('\t\tTraining Reg_Edge_3_1 Mean_loss: %f' % total_reg_edge_3_1_loss)
-        log_string('\t\tTraining Reg_Edge_3_1 Recall: %f' % total_reg_edge_3_1_loss)
+        log_string('\t\tTraining Edge_3_1 Mean_Loss: %f' % total_edge_3_1_loss)
+        log_string('\t\tTraining Edge_3_1 Mean_Accuracy: %f' % total_edge_3_1_acc)
+        log_string('\t\tTraining Edge_3_1 Mean_Recall: %f' % total_edge_3_1_recall)
+        log_string('\t\tTraining Corner_3_1 Mean_Loss: %f' % total_corner_3_1_loss)
+        log_string('\t\tTraining Corner_3_1 Mean_Accuracy: %f' % total_corner_3_1_acc)
+        log_string('\t\tTraining Corner_3_1 Mean_Recall: %f' % total_corner_3_1_recall)
+        log_string('\t\tTraining Reg_Edge_3_1 Mean_Loss: %f' % total_reg_edge_3_1_loss)
+        log_string('\t\tTraining Reg_Corner_3_1 Mean_Loss: %f' % total_reg_corner_3_1_loss)
 #        log_string('\t\tTraining TASK 2_1 Mean_loss: %f' % total_task_2_1_loss)
 #        log_string('\t\tTraining TASK 2_1 Accuracy: %f' % total_task_2_1_acc)
 #        log_string('\t\tTraining TASK 2_2 Mean_loss: %f' % total_task_2_2_loss)
