@@ -64,8 +64,8 @@ def placeholder_inputs(batch_size,num_point):
     labels_key_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))  # edge points label 0/1
     labels_corner_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point)) 
     #labels_direction = tf.placeholder(tf.int32,shape=(batch_size,num_point))
-    reg_edge_p = tf.placeholder(tf.float32,shape=(batch_size,num_point,3))
-    reg_corner_p = tf.placeholder(tf.float32,shape=(batch_size,num_point,3))
+    reg_edge_p = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))
+    reg_corner_p = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))
 #    labels_type = tf.placeholder(tf.int32,shape=(batch_size,num_point))
 #    simmat_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,num_point))
 #    neg_simmat_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,num_point))
@@ -188,9 +188,9 @@ def get_stage_1_loss(pred_labels_edge_p, pred_labels_corner_p, labels_edge_p, la
     lambda_edge, lambda_corner  = 10, 10
 
     # check if these are ok:
-    L_edge = tf.add(edge_3_1_loss, tf.multiply(lambda_edge, reg_edge_3_1_loss))
-    L_corner = tf.add(corner_3_1_loss, tf.multiply(lambda_corner, reg_corner_3_1_loss))
-    loss = tf.add(L_edge + L_corner)
+    L_edge = edge_3_1_loss + lambda_edge*reg_edge_3_1_loss
+    L_corner = corner_3_1_loss + lambda_corner*reg_corner_3_1_loss
+    loss = L_edge + L_corner
 
     tf.summary.scalar('all loss', loss)
     tf.compat.v1.add_to_collection('losses', loss)
