@@ -1,5 +1,6 @@
 import argparse
 import math
+import fnmatch
 from datetime import datetime
 import h5py
 import numpy as np
@@ -254,6 +255,9 @@ def train():
                     save_path = saver.save(sess, os.path.join(LOG_DIR, model_ccc_path))
                     log_string("Model saved in file: %s" % save_path)
         elif STAGE==2:
+            '''
+            stage 2 continues the existing training.
+            '''
             ops = {'pointclouds_pl': pointclouds_pl,
                'proposal_nx_pl': proposal_nx_pl,
                'dof_mask_pl': dof_mask_pl,
@@ -279,16 +283,18 @@ def train():
 
 def train_one_epoch_stage_1(sess, ops, train_writer):
     is_training = True
-    permutation = np.random.permutation(32)
+    matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/train_data/new_train/'), '*.mat')
+    files_num = len(matrices_names_list)
+    permutation = np.random.permutation(files_num)
     for i in range(len(permutation)//4):
         load_data_start_time = time.time()
-        loadpath = BASE_DIR + '/train_data/'+str(permutation[i*4]+1)+'.mat'   # change training data path
+        loadpath = BASE_DIR + '/train_data/new_train/'+matrices_names_list[permutation[i*4]]   # change training data path
         train_data = sio.loadmat(loadpath)['Training_data']
         load_data_duration = time.time() - load_data_start_time
         log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
         for j in range(3):
             temp_load_data_start_time = time.time()
-            temp_loadpath = BASE_DIR + '/train_data/'+str(permutation[i*4+j+1]+1)+'.mat'      # change training data path
+            temp_loadpath = BASE_DIR + '/train_data/new_train/'+matrices_names_list[permutation[i*4+j]]      # change training data path
             temp_train_data = sio.loadmat(temp_loadpath)['Training_data']
             temp_load_data_duration = time.time() - temp_load_data_start_time
             log_string('\t%s: %s load time: %f' % (datetime.now(),temp_loadpath,temp_load_data_duration))
@@ -314,7 +320,7 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
 #        total_task_6_loss = 0.0
         process_start_time = time.time()
         np.random.shuffle(train_data)
-        for j in range(num_batch):
+        for j in range(num_batch): # 8 times for batch each, which is size of 32.
             begin_idx = j*BATCH_SIZE
             end_idx = (j+1)*BATCH_SIZE
             data_cells = train_data[begin_idx: end_idx,0]
