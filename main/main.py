@@ -31,7 +31,7 @@ parser.add_argument('--model', default='model_all', help='Model name [default: m
 parser.add_argument('--stage_1_log_dir', default='stage_1_log', help='Log dir [default: log]')
 parser.add_argument('--stage_2_log_dir', default='stage_2_log', help='Log dir [default: log]')
 parser.add_argument('--num_point', type=int, default=8096, help='Point Number [default: 2048]')
-parser.add_argument('--max_epoch', type=int, default=101, help='Epoch to run [default: 201]')
+parser.add_argument('--max_epoch', type=int, default=400, help='Epoch to run [default: 251]')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch Size during training [default: 32]')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Initial learning rate [default: 0.001]')
 parser.add_argument('--momentum', type=float, default=0.9, help='Initial learning rate [default: 0.9]')
@@ -65,7 +65,7 @@ else:
     LOG_DIR = FLAGS.stage_2_log_dir
 if not os.path.exists(LOG_DIR): os.mkdir(LOG_DIR)
 os.system('cp %s %s' % (MODEL_FILE, LOG_DIR)) # bkp of model def
-os.system('cp train.py %s' % (LOG_DIR)) # bkp of train procedure
+os.system('cp main.py %s' % (LOG_DIR)) # bkp of train procedure
 LOG_FOUT = open(os.path.join(LOG_DIR, 'log_train.txt'), 'w')
 LOG_FOUT.write(str(FLAGS)+'\n')
 
@@ -238,7 +238,6 @@ def train():
                             #tf.summary.scalar('labels_type_loss', task_4_loss)
                             #tf.summary.scalar('labels_type_acc', task_4_acc)
                             tf.compat.v1.summary.scalar('%d_GPU_loss'% (i), loss)
-                            
 
                             grads = optimizer.compute_gradients(loss) # here's where the loss and gradients are covered.
                             tower_grads.append(grads)
@@ -259,7 +258,7 @@ def train():
                 pred_reg_corner_p = tf.concat(pred_reg_corner_p_gpu, 0)
                 total_loss = tf.reduce_mean(input_tensor = total_loss_gpu)
                 
-                # Get training operator 
+                # Get training operator
                 grads = average_gradients(tower_grads)
                 train_op = optimizer.apply_gradients(grads, global_step=batch)
                 # train_op = optimizer.minimize(loss, global_step=batch_stage_1)
@@ -360,9 +359,12 @@ def train():
                'step': batch}
                #'end_points': end_points
             for epoch in range(MAX_EPOCH):
-                log_string('**** TRAIN EPOCH %03d ****' % (epoch))
+                #log_string('**** TRAIN EPOCH %03d ****' % (epoch))
+                #train_one_epoch_stage_1(sess,ops,train_writer)
+                #sys.stdout.flush()
+                log_string('**** TEST EPOCH %03d ****' % (epoch))
+                eval_one_epoch(sess, ops, test_writer)
                 sys.stdout.flush()
-                train_one_epoch_stage_1(sess,ops,train_writer)
                 # Save the variables to disk.
                 if epoch % 2 == 0:
                     model_ccc_path = "model"+str(epoch)+".ckpt"
@@ -394,23 +396,25 @@ def train():
 
 def train_one_epoch_stage_1(sess, ops, train_writer):
     is_training = True
-    matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/train_data/new_train/'), '*.mat')
-    permutation = np.random.permutation(32)
+    train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/train_data/new_train/'), '*.mat')
+    matrix_num = len(train_matrices_names_list)
+    permutation = np.random.permutation(matrix_num)
     for i in range(len(permutation)//4):
         load_data_start_time = time.time()
-        loadpath = BASE_DIR + '/train_data/new_train/'+matrices_names_list[permutation[i*4]]
+        loadpath = BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4]]
         train_data = sio.loadmat(loadpath)['Training_data']
         load_data_duration = time.time() - load_data_start_time
         log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
         for j in range(3):
             temp_load_data_start_time = time.time()
-            temp_loadpath = BASE_DIR + '/train_data/new_train/'+matrices_names_list[permutation[i*4+j]]
+            temp_loadpath = BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4+j]]
             temp_train_data = sio.loadmat(temp_loadpath)['Training_data']
             temp_load_data_duration = time.time() - temp_load_data_start_time
             log_string('\t%s: %s load time: %f' % (datetime.now(),temp_loadpath,temp_load_data_duration))
             train_data = np.concatenate((train_data,temp_train_data),axis = 0)
             print(train_data.shape)
 
+        #push_eval(train_data, ops, sess, train_writer, is_training)
         num_data = train_data.shape[0]
         num_batch = num_data // BATCH_SIZE
         total_loss = 0.0
@@ -540,7 +544,166 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
 #        log_string('\t\tTraining TASK 4 Accuracy: %f' % total_task_4_acc)
 #        log_string('\t\tTraining TASK 5 Mean_loss: %f' % total_task_5_loss)
 #        log_string('\t\tTraining TASK 6 Mean_loss: %f' % total_task_6_loss)
+        
 
+def eval_one_epoch(sess, ops, test_writer):
+    """ ops: dict mapping from string to tf ops """
+    train_or_test = "EVAL"
+    is_training = False
+    log_string(str(datetime.now()))
+    log_string('---- EPOCH %03d EVALUATION ----'%(EPOCH_CNT))
+    # just use one matrix.
+    test_matrices_name = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '0099_4.mat')
+    loadpath = BASE_DIR + '/test_data/new_test/'+test_matrices_name[0]
+    test_data = sio.loadmat(loadpath)['Training_data']
+
+    num_data = test_data.shape[0]
+    num_batch = num_data // BATCH_SIZE
+    total_loss = 0.0
+    total_edge_3_1_loss = 0.0
+    total_edge_3_1_recall = 0.0
+    total_edge_3_1_acc = 0.0
+    total_corner_3_1_loss = 0.0
+    total_corner_3_1_recall = 0.0
+    total_corner_3_1_acc = 0.0
+    total_reg_edge_3_1_loss = 0.0
+    total_reg_corner_3_1_loss = 0.0
+    #        total_task_2_2_loss = 0.0
+    #        total_task_3_loss = 0.0
+    #        total_task_4_loss = 0.0
+    #        total_task_4_acc = 0.0
+    #        total_task_5_loss = 0.0
+    #        total_task_6_loss = 0.0
+    process_start_time = time.time()
+    np.random.shuffle(test_data)
+    for j in range(num_batch):
+        begin_idx = j*BATCH_SIZE
+        end_idx = (j+1)*BATCH_SIZE
+        data_cells = test_data[begin_idx: end_idx,0]
+        batch_inputs = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)  # input point clouds  # original code  =6
+        batch_labels_edge_p = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)  # edge point label 0/1
+        batch_labels_corner_p = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)  # edge point label 0/1
+        #batch_labels_direction = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
+        batch_regression_edge = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)  # each point normal estimation
+        batch_regression_corner = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)
+        #batch_labels_type = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
+        #batch_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
+        #batch_neg_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
+        for cnt in range(BATCH_SIZE):
+            tmp_data = data_cells[cnt]
+            batch_inputs[cnt,:,:] = tmp_data[0,0]['down_sample_point']
+            batch_labels_edge_p[cnt,:] = np.squeeze(tmp_data[0,0]['edge_points_label'])
+            batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data[0,0]['corner_points_label'])
+            #batch_labels_direction[cnt,:] = np.squeeze(tmp_data['motion_direction_class'][0,0])
+            batch_regression_edge[cnt,:,:] = tmp_data[0,0]['edge_points_residual_vector']
+            batch_regression_corner[cnt,:,:] = tmp_data[0,0]['corner_points_residual_vector']
+            #batch_labels_type[cnt,:] = np.squeeze(tmp_data['motion_dof_type'][0,0])
+            #tmp_simmat = tmp_data['similar_matrix'][0,0]
+            #batch_simmat_pl[cnt,:,:] = tmp_simmat + tmp_simmat.T
+            #tmp_neg_simmat = 1 - tmp_simmat
+            #tmp_neg_simmat = tmp_neg_simmat - np.eye(NUM_POINT) 
+            #batch_neg_simmat_pl[cnt,:,:] = tmp_neg_simmat
+        feed_dict = {ops['pointclouds_pl']: batch_inputs,
+                    ops['labels_edge_p']: batch_labels_edge_p,
+                    ops['labels_corner_p']: batch_labels_corner_p,
+                    #ops['labels_direction']: batch_labels_direction,
+                    ops['reg_edge_p']: batch_regression_edge,
+                    ops['reg_corner_p']: batch_regression_corner,
+                    #ops['labels_type']: batch_labels_type,
+                    #ops['simmat_pl']: batch_simmat_pl,
+                    #ops['neg_simmat_pl']: batch_neg_simmat_pl,
+                    ops['is_training_pl']: is_training}
+                    
+                        
+    #            summary, step, _, task_1_loss_val,task_1_recall_val,task_1_acc_val,task_2_1_loss_val,task_2_1_acc_val,task_2_2_loss_val, \
+    #                                 task_3_loss_val,task_4_loss_val,task_4_acc_val,task_5_loss_val, \
+    #                                 task_6_loss_val, loss_val = sess.run([ops['merged'], ops['step'], \
+    #                                 ops['train_op'], ops['task_1_loss'], ops['task_1_recall'],ops['task_1_acc'],ops['task_2_1_loss'], \
+    #                                 ops['task_2_1_acc'],ops['task_2_2_loss'],ops['task_3_loss'],ops['task_4_loss'], \
+    #                                 ops['task_4_acc'],ops['task_5_loss'],ops['task_6_loss'],ops['loss']],feed_dict=feed_dict)
+        summary, step, _, edge_3_1_loss_val, edge_3_1_recall_val, edge_3_1_acc_val, \
+        corner_3_1_loss_val, corner_3_1_recall_val, corner_3_1_acc_val, \
+            reg_edge_3_1_loss_val, reg_corner_3_1_loss_val, loss_val = \
+            sess.run([ops['merged'], ops['step'], ops['train_op'], \
+                ops['edge_3_1_loss'], ops['edge_3_1_recall'], ops['edge_3_1_acc'],\
+                ops['corner_3_1_loss'], ops['corner_3_1_recall'], ops['corner_3_1_acc'],\
+                ops['reg_edge_3_1_loss'], ops['reg_corner_3_1_loss'], ops['loss']],feed_dict=feed_dict)
+                
+        test_writer.add_summary(summary, step)
+        total_loss += loss_val
+        total_edge_3_1_loss += edge_3_1_loss_val
+        total_edge_3_1_acc += edge_3_1_acc_val
+        total_edge_3_1_recall += edge_3_1_recall_val
+        total_corner_3_1_loss += corner_3_1_loss_val
+        total_corner_3_1_acc += corner_3_1_acc_val
+        total_corner_3_1_recall += corner_3_1_recall_val
+        total_reg_edge_3_1_loss += reg_edge_3_1_loss_val
+        total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
+    #            total_task_2_1_loss += task_2_1_loss_val
+    #            total_task_2_1_acc += task_2_1_acc_val
+    #            total_task_2_2_loss += task_2_2_loss_val
+    #            total_task_3_loss += task_3_loss_val
+    #            total_task_4_loss += task_4_loss_val
+    #            total_task_4_acc += task_4_acc_val
+    #            total_task_5_loss += task_5_loss_val
+    #            total_task_6_loss += task_6_loss_val
+                #print('loss: %f' % loss_val)
+    total_loss = total_loss * 1.0 / num_batch
+    total_edge_3_1_loss = total_edge_3_1_loss * 1.0 / num_batch
+    total_edge_3_1_acc = total_edge_3_1_acc * 1.0 / num_batch
+    total_edge_3_1_recall = total_edge_3_1_recall * 1.0 / num_batch
+    total_corner_3_1_loss = total_corner_3_1_loss * 1.0 / num_batch
+    total_corner_3_1_acc = total_corner_3_1_acc * 1.0 / num_batch
+    total_corner_3_1_recall = total_corner_3_1_recall * 1.0 / num_batch
+    total_reg_edge_3_1_loss = total_reg_edge_3_1_loss * 1.0 / num_batch
+    total_reg_corner_3_1_loss = total_reg_corner_3_1_loss * 1.0 / num_batch
+    #        total_task_2_1_loss = total_task_2_1_loss * 1.0 / num_batch
+    #        total_task_2_1_acc = total_task_2_1_acc * 1.0 / num_batch
+    #        total_task_2_2_loss = total_task_2_2_loss * 1.0 / num_batch
+    #        total_task_3_loss = total_task_3_loss * 1.0 / num_batch
+    #        total_task_4_loss = total_task_4_loss * 1.0 / num_batch
+    #        total_task_4_acc = total_task_4_acc * 1.0 / num_batch
+    #        total_task_5_loss = total_task_5_loss * 1.0 / num_batch
+    #        total_task_6_loss = total_task_6_loss * 1.0 / num_batch
+    process_duration = time.time() - process_start_time
+    examples_per_sec = num_data/process_duration
+    sec_per_batch = process_duration/num_batch
+    log_string('\t%s: step: %f loss: %f duration time %.3f (%.1f examples/sec; %.3f sec/batch)' \
+    % (datetime.now(),step,total_loss,process_duration,examples_per_sec,sec_per_batch))
+    log_string('\t\t%s Edge_3_1 Mean_Loss: %f' % (train_or_test, total_edge_3_1_loss))
+    log_string('\t\t%s Edge_3_1 Mean_Accuracy: %f' % (train_or_test, total_edge_3_1_acc))
+    log_string('\t\t%s Edge_3_1 Mean_Recall: %f' % (train_or_test, total_edge_3_1_recall))
+    log_string('\t\t%s Corner_3_1 Mean_Loss: %f' % (train_or_test, total_corner_3_1_loss))
+    log_string('\t\t%s Corner_3_1 Mean_Accuracy: %f' % (train_or_test, total_corner_3_1_acc))
+    log_string('\t\t%s Corner_3_1 Mean_Recall: %f' % (train_or_test, total_corner_3_1_recall))
+    log_string('\t\t%s Reg_Edge_3_1 Mean_Loss: %f' % (train_or_test, total_reg_edge_3_1_loss))
+    log_string('\t\t%s Reg_Corner_3_1 Mean_Loss: %f' % (train_or_test, total_reg_corner_3_1_loss))
+    input_labels_edge_p = np.zeros((num_data,NUM_POINT),np.int32)
+    input_labels_corner_p = np.zeros((num_data,NUM_POINT),np.int32)
+    pred_labels_edge_p_val = np.zeros((num_data, NUM_POINT, 2), np.float32)
+    pred_labels_corner_p_val = np.zeros((num_data, NUM_POINT, 2), np.float32)
+
+    #        log_string('\t\tTraining TASK 2_1 Mean_loss: %f' % total_task_2_1_loss)
+    #        log_string('\t\tTraining TASK 2_1 Accuracy: %f' % total_task_2_1_acc)
+    #        log_string('\t\tTraining TASK 2_2 Mean_loss: %f' % total_task_2_2_loss)
+    #        log_string('\t\tTraining TASK 3 Mean_loss: %f' % total_task_3_loss)
+    #        log_string('\t\tTraining TASK 4 Mean_loss: %f' % total_task_4_loss)
+    #        log_string('\t\tTraining TASK 4 Accuracy: %f' % total_task_4_acc)
+    #        log_string('\t\tTraining TASK 5 Mean_loss: %f' % total_task_5_loss)
+    #        log_string('\t\tTraining TASK 6 Mean_loss: %f' % total_task_6_loss)
+    sio.savemat('./test_result/test_pred_'+test_matrices_name[0], {'input_point_cloud': test_data, \
+                                                'input_labels_key_p': input_labels_edge_p, \
+                                                'input_labels_corner_p': input_labels_corner_p, \
+                                                'pred_labels_key_p_val': pred_labels_key_p_val, \
+                                                'pred_labels_corner_p_val': pred_labels_corner_p_val})
+
+
+
+
+
+
+
+'''
 def train_one_epoch_stage_2(sess, ops, train_writer):
     is_training = True
     permutation = np.random.permutation(328)
@@ -596,7 +759,7 @@ def train_one_epoch_stage_2(sess, ops, train_writer):
         sec_per_batch = process_duration/num_batch
         log_string('\t%s: step: %f loss: %f duration time %.3f (%.1f examples/sec; %.3f sec/batch)' \
            % (datetime.now(),step,total_loss,process_duration,examples_per_sec,sec_per_batch))
-
+'''
 
 if __name__ == "__main__":
     log_string('pid: %s'%(str(os.getpid())))
