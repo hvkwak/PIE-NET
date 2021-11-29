@@ -34,7 +34,7 @@ parser.add_argument('--momentum', type=float, default=0.9, help='Initial learnin
 parser.add_argument('--optimizer', default='adam', help='adam or momentum [default: adam]')
 parser.add_argument('--decay_step', type=int, default=200000, help='Decay step for lr decay [default: 200000]')
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
-parser.add_argument('--stage',type=int,default=2,help='network stage')
+parser.add_argument('--stage',type=int,default=1,help='network stage')
 FLAGS = parser.parse_args()
 
 EPOCH_CNT = 0
