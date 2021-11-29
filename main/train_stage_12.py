@@ -9,6 +9,7 @@ import importlib
 import os
 import sys
 import time
+import fnmatch
 
 
 from datetime import datetime
@@ -34,7 +35,7 @@ parser.add_argument('--momentum', type=float, default=0.9, help='Initial learnin
 parser.add_argument('--optimizer', default='adam', help='adam or momentum [default: adam]')
 parser.add_argument('--decay_step', type=int, default=200000, help='Decay step for lr decay [default: 200000]')
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
-parser.add_argument('--stage',type=int,default=2,help='network stage')
+parser.add_argument('--stage',type=int,default=1,help='network stage')
 FLAGS = parser.parse_args()
 
 EPOCH_CNT = 0
@@ -272,16 +273,18 @@ def train():
 
 def train_one_epoch_stage_1(sess, ops, train_writer):
     is_training = True
-    permutation = np.random.permutation(32)
+    train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/train_data/new_train/'), '*.mat')
+    matrix_num = len(train_matrices_names_list)    
+    permutation = np.random.permutation(matrix_num)
     for i in range(len(permutation)//4):
         load_data_start_time = time.time()
-        loadpath = BASE_DIR + '/train_data/'+str(permutation[i*4]+1)+'.mat'   # change training data path
+        loadpath = BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4]]
         train_data = sio.loadmat(loadpath)['Training_data']
         load_data_duration = time.time() - load_data_start_time
         log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
         for j in range(3):
             temp_load_data_start_time = time.time()
-            temp_loadpath = BASE_DIR + '/train_data/'+str(permutation[i*4+j+1]+1)+'.mat'      # change training data path
+            temp_loadpath = BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4]]
             temp_train_data = sio.loadmat(temp_loadpath)['Training_data']
             temp_load_data_duration = time.time() - temp_load_data_start_time
             log_string('\t%s: %s load time: %f' % (datetime.now(),temp_loadpath,temp_load_data_duration))
@@ -321,9 +324,9 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
             #batch_neg_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
             for cnt in range(BATCH_SIZE):
                 tmp_data = data_cells[cnt]
-                batch_inputs[cnt,:,:] = tmp_data['down_sample_point'][0, 0]
-                batch_labels_key_p[cnt,:] = np.squeeze(tmp_data['PC_8096_edge_points_label_bin'][0,0])
-                batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data['corner_points_label'][0,0])
+                batch_inputs[cnt,:,:] = tmp_data[0, 0]['down_sample_point']
+                batch_labels_key_p[cnt,:] = np.squeeze(tmp_data[0, 0]['edge_points_label'])
+                batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data[0, 0]['corner_points_label'])
                 #batch_labels_direction[cnt,:] = np.squeeze(tmp_data['motion_direction_class'][0,0])
                 #batch_regression_direction[cnt,:,:] = tmp_data['PC_8096_edge_points_norm'][0,0]
                 #batch_regression_position[cnt,:,:] = tmp_data['motion_position_param'][0,0]
