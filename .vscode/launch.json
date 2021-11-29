@@ -10,8 +10,8 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "environment": [{ "name":"CUDA_VISIBLE_DEVICES", "value":"0,1,2,3,4,5,6,7"}],
-            "args": ["--num_gpus=8"]            
+            "environment": [{ "name":"CUDA_VISIBLE_DEVICES", "value":"4,5,6,7"}],
+            "args": ["--num_gpus=4"]            
         }
     ]
 }
