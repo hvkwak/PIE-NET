@@ -284,7 +284,7 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
         log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
         for j in range(3):
             temp_load_data_start_time = time.time()
-            temp_loadpath = BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4]]
+            temp_loadpath = BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4+j+1]]
             temp_train_data = sio.loadmat(temp_loadpath)['Training_data']
             temp_load_data_duration = time.time() - temp_load_data_start_time
             log_string('\t%s: %s load time: %f' % (datetime.now(),temp_loadpath,temp_load_data_duration))
