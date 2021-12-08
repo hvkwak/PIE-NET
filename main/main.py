@@ -31,7 +31,7 @@ parser.add_argument('--model', default='model_all', help='Model name [default: m
 parser.add_argument('--stage_1_log_dir', default='stage_1_log', help='Log dir [default: log]')
 parser.add_argument('--stage_2_log_dir', default='stage_2_log', help='Log dir [default: log]')
 parser.add_argument('--num_point', type=int, default=8096, help='Point Number [default: 2048]')
-parser.add_argument('--max_epoch', type=int, default=400, help='Epoch to run [default: 251]')
+parser.add_argument('--max_epoch', type=int, default=251, help='Epoch to run [default: 251]')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch Size during training [default: 32]')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Initial learning rate [default: 0.001]')
 parser.add_argument('--momentum', type=float, default=0.9, help='Initial learning rate [default: 0.9]')
@@ -65,7 +65,7 @@ else:
     LOG_DIR = FLAGS.stage_2_log_dir
 if not os.path.exists(LOG_DIR): os.mkdir(LOG_DIR)
 os.system('cp %s %s' % (MODEL_FILE, LOG_DIR)) # bkp of model def
-os.system('cp main.py %s' % (LOG_DIR)) # bkp of train procedure
+os.system('cp main.py %s' % (ROOT_DIR+"/"+LOG_DIR)) # bkp of train procedure
 LOG_FOUT = open(os.path.join(LOG_DIR, 'log_train.txt'), 'w')
 LOG_FOUT.write(str(FLAGS)+'\n')
 
@@ -359,9 +359,9 @@ def train():
                'step': batch}
                #'end_points': end_points
             for epoch in range(MAX_EPOCH):
-                #log_string('**** TRAIN EPOCH %03d ****' % (epoch))
-                #train_one_epoch_stage_1(sess,ops,train_writer)
-                #sys.stdout.flush()
+                log_string('**** TRAIN EPOCH %03d ****' % (epoch))
+                train_one_epoch_stage_1(sess,ops,train_writer)
+                sys.stdout.flush()
                 log_string('**** TEST EPOCH %03d ****' % (epoch))
                 eval_one_epoch(sess, ops, test_writer)
                 sys.stdout.flush()
@@ -407,7 +407,7 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
         log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
         for j in range(3):
             temp_load_data_start_time = time.time()
-            temp_loadpath = BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4+j]]
+            temp_loadpath = BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4+j+1]]
             temp_train_data = sio.loadmat(temp_loadpath)['Training_data']
             temp_load_data_duration = time.time() - temp_load_data_start_time
             log_string('\t%s: %s load time: %f' % (datetime.now(),temp_loadpath,temp_load_data_duration))
@@ -553,7 +553,7 @@ def eval_one_epoch(sess, ops, test_writer):
     log_string(str(datetime.now()))
     log_string('---- EPOCH %03d EVALUATION ----'%(EPOCH_CNT))
     # just use one matrix.
-    test_matrices_name = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '0099_4.mat')
+    test_matrices_name = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '0015_1.mat')
     loadpath = BASE_DIR + '/test_data/new_test/'+test_matrices_name[0]
     test_data = sio.loadmat(loadpath)['Training_data']
 
@@ -694,7 +694,7 @@ def eval_one_epoch(sess, ops, test_writer):
     sio.savemat('./test_result/test_pred_'+test_matrices_name[0], {'input_point_cloud': test_data, \
                                                 'input_labels_key_p': input_labels_edge_p, \
                                                 'input_labels_corner_p': input_labels_corner_p, \
-                                                'pred_labels_key_p_val': pred_labels_key_p_val, \
+                                                'pred_labels_edge_p_val': pred_labels_edge_p_val, \
                                                 'pred_labels_corner_p_val': pred_labels_corner_p_val})
 
 
