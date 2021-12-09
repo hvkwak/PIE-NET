@@ -190,8 +190,8 @@ def train():
                 pred_labels_corner_p_gpu = []
                 pred_reg_edge_p_gpu = []
                 pred_reg_corner_p_gpu = []
-
                 total_loss_gpu = []
+
                 for i in range(NUM_GPUS):
                     with tf.compat.v1.variable_scope(tf.compat.v1.get_variable_scope(), reuse=True):
                         with tf.device('/gpu:%d'%(i)), tf.compat.v1.name_scope('gpu_%d'%(i)) as scope:
@@ -206,7 +206,7 @@ def train():
 
                             pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model(pc_batch, is_training_pl,STAGE,bn_decay=bn_decay)
 
-                            
+
                             edge_3_1_loss,   edge_3_1_recall,   edge_3_1_acc,\
                             corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
                             reg_edge_3_1_loss, reg_corner_3_1_loss, loss = MODEL.get_stage_1_loss(pred_labels_edge_p, \
@@ -266,7 +266,7 @@ def train():
                 # Add ops to save and restore all the variables.
                 saver = tf.compat.v1.train.Saver(max_to_keep=10)
 
-
+            '''
             elif STAGE==2:
                 print('stage_2')
                 pointclouds_pl,proposal_nx_pl,dof_mask_pl,dof_score_pl= MODEL.placeholder_inputs_stage_2(BATCH_SIZE,NUM_POINT)
@@ -298,6 +298,7 @@ def train():
                 # Add ops to save and restore all the variables.
                 saver = tf.compat.v1.train.Saver(var_list = variables_to_resotre)
                 saver2 = tf.compat.v1.train.Saver(max_to_keep=100)
+            '''
         
         # Create a session
         config = tf.compat.v1.ConfigProto()
@@ -370,6 +371,7 @@ def train():
                     model_ccc_path = "model"+str(epoch)+".ckpt"
                     save_path = saver.save(sess, os.path.join(LOG_DIR, model_ccc_path))
                     log_string("Model saved in file: %s" % save_path)
+        '''
         elif STAGE==2:
             ops = {'pointclouds_pl': pointclouds_pl,
                'proposal_nx_pl': proposal_nx_pl,
@@ -392,7 +394,7 @@ def train():
                     model_ccc_path = "model"+str(epoch)+".ckpt"
                     save_path = saver2.save(sess, os.path.join(LOG_DIR, model_ccc_path))
                     log_string("Model saved in file: %s" % save_path)
-
+        '''
 
 def train_one_epoch_stage_1(sess, ops, train_writer):
     is_training = True
@@ -553,8 +555,8 @@ def eval_one_epoch(sess, ops, test_writer):
     log_string(str(datetime.now()))
     log_string('---- EPOCH %03d EVALUATION ----'%(EPOCH_CNT))
     # just use one matrix.
-    test_matrices_name = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '0015_1.mat')
-    loadpath = BASE_DIR + '/test_data/new_test/'+test_matrices_name[0]
+    #test_matrices_name = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '99.mat')
+    loadpath = BASE_DIR + '/test_data/new_test/'+"99.mat"
     test_data = sio.loadmat(loadpath)['Training_data']
 
     num_data = test_data.shape[0]

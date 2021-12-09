@@ -221,7 +221,7 @@ def get_stage_1_loss(pred_labels_edge_p, pred_labels_corner_p, labels_edge_p, la
     #loss = task_1_loss*w1 + task_1_1_loss*w1_1
 
     # check for optimal lambda_edge to balance.
-    lambda_edge, lambda_corner  = 65.0, 46.0
+    lambda_edge, lambda_corner  = 45.0, 45.0
 
     # check if these are ok:
     L_edge = edge_3_1_loss+lambda_edge*reg_edge_3_1_loss
