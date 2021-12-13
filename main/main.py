@@ -157,7 +157,8 @@ def train():
         with tf.device('/cpu:0'):
             if STAGE==1:
                 # remember that reg_{edge, corner}_p is label.
-                pointclouds_pl, labels_edge_p, labels_corner_p, reg_edge_p, reg_corner_p = MODEL.placeholder_inputs(BATCH_SIZE,NUM_POINT)
+                pointclouds_pl, labels_edge_p, labels_corner_p, reg_edge_p, reg_corner_p = MODEL.placeholder_inputs_31(BATCH_SIZE,NUM_POINT)
+                ?, ?, ?, ?, ? = MODEL.placeholder_inputs_32(BATCH_SIZE,NUM_POINT)
                 is_training_pl = tf.compat.v1.placeholder(tf.bool, shape=())
                 
                 # Note the global_step=batch parameter to minimize. 
@@ -183,7 +184,8 @@ def train():
                 # -------------------------------------------
                 # Allocating variables on CPU first will greatly accelerate multi-gpu training.
                 # Ref: https://github.com/kuza55/keras-extras/issues/21
-                MODEL.get_model(pointclouds_pl, is_training_pl,STAGE,bn_decay=bn_decay)
+                MODEL.get_model_31(pointclouds_pl, is_training_pl,STAGE,bn_decay=bn_decay)
+                MODEL.get_model_32(pointclouds_pl, is_training_pl,STAGE,bn_decay=bn_decay)
 
                 tower_grads = []
                 pred_labels_edge_p_gpu = []
@@ -204,7 +206,8 @@ def train():
                             reg_edge_p_batch = tf.slice(reg_edge_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
                             reg_corner_p_batch = tf.slice(reg_corner_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
 
-                            pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model(pc_batch, is_training_pl,STAGE,bn_decay=bn_decay)
+                            pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_31(pc_batch, is_training_pl,STAGE,bn_decay=bn_decay)
+                            pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_32(pc_batch, is_training_pl,STAGE,bn_decay=bn_decay)
 
 
                             edge_3_1_loss,   edge_3_1_recall,   edge_3_1_acc,\
