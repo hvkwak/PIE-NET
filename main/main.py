@@ -552,8 +552,8 @@ def eval_one_epoch(sess, ops, test_writer):
     """ ops: dict mapping from string to tf ops """
     train_or_test = "EVAL"
     is_training = False
-    log_string(str(datetime.now()))
-    log_string('---- EPOCH %03d EVALUATION ----'%(EPOCH_CNT))
+    #log_string(str(datetime.now()))
+    #log_string('---- EPOCH %03d EVALUATION ----'%(EPOCH_CNT))
     # just use one matrix.
     test_matrices_name = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '99.mat')
     loadpath = BASE_DIR + '/test_data/new_test/'+test_matrices_name[0]
@@ -607,7 +607,7 @@ def eval_one_epoch(sess, ops, test_writer):
             
             batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data[0,0]['corner_points_label'])
             input_labels_corner_p[begin_idx+cnt, :] = np.squeeze(tmp_data[0,0]['corner_points_label'])
-            
+
             #batch_labels_direction[cnt,:] = np.squeeze(tmp_data['motion_direction_class'][0,0])
             batch_regression_edge[cnt,:,:] = tmp_data[0,0]['edge_points_residual_vector']
             batch_regression_corner[cnt,:,:] = tmp_data[0,0]['corner_points_residual_vector']
