@@ -15,7 +15,7 @@ def smooth_l1_dist(deltas, sigma2=2.0, name='smooth_l1_dist'):
         return tf.square(deltas) * 0.5 * sigma2 * smoothL1_sign + \
                    (deltas_abs - 0.5 / sigma2) * tf.abs(smoothL1_sign - 1)
 
-def get_model(point_cloud, is_training,stage,bn_decay=None):
+def get_model_31(point_cloud, is_training,stage,bn_decay=None):
     """ Part segmentation PointNet, input is BxNx6 (XYZ NormalX NormalY NormalZ), output Bx50 """
     batch_size = point_cloud.get_shape()[0]
     num_point = point_cloud.get_shape()[1]
