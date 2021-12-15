@@ -142,6 +142,14 @@ def get_learning_rate_stage_2(batch,base_learning_rate):
     learning_rate = tf.maximum(learning_rate, 0.00001) # CLIP THE LEARNING RATE!
     return learning_rate        
 
+def corner_pairs_neighbor_search(pc_batch, pred_labels_corner_p):
+    corner_num = tf.reduce_sum(tf.cast(pred_labels_corner_p > 0.9, tf.float32))
+    corner_points = tf.where(pred_labels_corner_p > 0.9)
+
+    ?
+
+    return
+
 def get_bn_decay(batch):
     bn_momentum = tf.compat.v1.train.exponential_decay(
                       BN_INIT_DECAY,
@@ -158,7 +166,8 @@ def train():
             if STAGE==1:
                 # remember that reg_{edge, corner}_p is label.
                 pointclouds_pl, labels_edge_p, labels_corner_p, reg_edge_p, reg_corner_p = MODEL.placeholder_inputs_31(BATCH_SIZE,NUM_POINT)
-                ?, ?, ?, ?, ? = MODEL.placeholder_inputs_32(BATCH_SIZE,NUM_POINT)
+                open_gt_256_64_idx, open_gt_mask, open_gt_type, open_gt_res, \
+                    open_gt_sample_points, open_gt_valid_mask, open_gt_pair_idx, = MODEL.placeholder_inputs_32(BATCH_SIZE)
                 is_training_pl = tf.compat.v1.placeholder(tf.bool, shape=())
                 
                 # Note the global_step=batch parameter to minimize. 
@@ -207,9 +216,13 @@ def train():
                             reg_corner_p_batch = tf.slice(reg_corner_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
 
                             pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_31(pc_batch, is_training_pl,STAGE,bn_decay=bn_decay)
-                            pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_32(pc_batch, is_training_pl,STAGE,bn_decay=bn_decay)
 
-
+                            neighbor_points = corner_pairs_neighbor_search(pc_batch, pred_labels_corner_p)
+                            open_pre_mask, open_pre_class_logits, open_pre_res, \
+                            open_pre_sample_points, open_ball_radius, open_ball_center, \
+                            open_b_spline_curve_pre, open_line_curve_pre, \
+                            = MODEL.get_model_32(pc_batch, is_training_pl, STAGE,bn_decay=bn_decay)
+                            
                             edge_3_1_loss,   edge_3_1_recall,   edge_3_1_acc,\
                             corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
                             reg_edge_3_1_loss, reg_corner_3_1_loss, loss = MODEL.get_stage_1_loss(pred_labels_edge_p, \
@@ -219,7 +232,12 @@ def train():
                                                                                                 pred_reg_edge_p, \
                                                                                                 pred_reg_corner_p, \
                                                                                                 reg_edge_p_batch, \
-                                                                                                reg_corner_p_batch)
+                                                                                                reg_corner_p_batch, \
+                                                                                                
+                                                                                                )
+
+
+
                             '''
                             MODEL.get_stage_1_loss(pred_labels_edge_p, pred_labels_corner_p, labels_edge_p_batch, labels_corner_p_batch, \
                                                     pred_reg_edge_p, pred_reg_corner_p, reg_edge_p_batch, reg_corner_p_batch)

@@ -16,7 +16,7 @@ def smooth_l1_dist(deltas, sigma2=2.0, name='smooth_l1_dist'):
         return tf.square(deltas) * 0.5 * sigma2 * smoothL1_sign + \
                    (deltas_abs - 0.5 / sigma2) * tf.abs(smoothL1_sign - 1)
 
-def placeholder_inputs31(batch_size,num_point):
+def placeholder_inputs_31(batch_size,num_point):
     pointclouds_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))  # input
     labels_key_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))  # edge points label 0/1
     labels_corner_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point)) 
@@ -109,6 +109,8 @@ def get_model_31(point_cloud, is_training,stage,bn_decay=None):
 
 #    return pred_labels_key_p,pred_labels_direction,pred_regression_direction,pred_regression_position, \
 #                                             pred_labels_type,pred_simmat,pred_conf_logits
+
+    ???? pc_batch[tf.where(pred_labels_corner_p > 0.9), ...]
     return pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p
 
 def get_stage_1_loss(pred_labels_edge_p, pred_labels_corner_p, labels_edge_p, labels_corner_p, pred_reg_edge_p, pred_reg_corner_p, reg_edge_p, reg_corner_p):
@@ -201,22 +203,24 @@ def get_stage_1_loss(pred_labels_edge_p, pred_labels_corner_p, labels_edge_p, la
     #return task_1_loss,task_1_recall,task_1_acc,task_2_1_loss,task_2_1_acc,task_2_2_loss,task_3_loss,task_4_loss,task_4_acc,task_5_loss,task_6_loss,loss
     return edge_3_1_loss, edge_3_1_recall, edge_3_1_acc, corner_3_1_loss, corner_3_1_recall, corner_3_1_acc, reg_edge_3_1_loss, reg_corner_3_1_loss, loss
 
-def placeholder_inputs_32(batch_size,num_point):
+def placeholder_inputs_32(batch_size):
     # placeholders for Section 3.2.
-    corner_pairs_gt = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,?))
+    open_gt_256_64_idx = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
+    open_gt_mask = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
+    open_gt_type = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,1))
+    open_gt_res = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,6))
+    open_gt_sample_points = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,64,3))
+    open_gt_valid_mask = tf.compat.v1.placeholder(shape = (batch_size,256,1))
+    open_gt_pair_idx = tf.compat.v1.placeholder(shape = (batch_size,256,2))
+    return open_gt_256_64_idx,open_gt_mask,open_gt_type,open_gt_res, open_gt_sample_points, open_gt_valid_mask, open_gt_pair_idx
 
-    proposal_nx_pl = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))
-    dof_mask_pl = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))
-    dof_score_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point))
-    return pointclouds_pl,proposal_nx_pl,dof_mask_pl,dof_score_pl
-
-def get_model32(corner_pair, is_training, bn_decay=None):
+def get_model_32(point_cloud, is_training, bn_decay=None):
     """ Classification PointNet, input is BxNx3, output BxNx? """
     # Code from PointNet in "https://github.com/charlesq34/pointnet"
     # Implementation of Section 3.2.
 
-    batch_size = point_cloud.get_shape()[0].value
-    num_point = point_cloud.get_shape()[1].value
+    batch_size = point_cloud.get_shape()[0]
+    num_point = point_cloud.get_shape()[1]
     end_points = {}
 
     with tf.compat.v1.variable_scope('transform_net1') as sc:
@@ -276,7 +280,6 @@ def get_model32(corner_pair, is_training, bn_decay=None):
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
                          scope='conv9', bn_decay=bn_decay)
-
     net = tf_util.conv2d(net, 50, [1,1],
                          padding='VALID', stride=[1,1], activation_fn=None,
                          scope='conv10')
