@@ -15,7 +15,7 @@ def smooth_l1_dist(deltas, sigma2=2.0, name='smooth_l1_dist'):
         smoothL1_sign = tf.cast(tf.less(deltas_abs, 1.0/sigma2), tf.float32)
         return tf.square(deltas) * 0.5 * sigma2 * smoothL1_sign + \
                    (deltas_abs - 0.5 / sigma2) * tf.abs(smoothL1_sign - 1)
-'''
+
 def placeholder_inputs_32(batch_size):
     # placeholders for Section 3.2.
     open_gt_256_64_idx = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
@@ -26,10 +26,23 @@ def placeholder_inputs_32(batch_size):
     open_gt_valid_mask = tf.compat.v1.placeholder(shape = (batch_size,256,1))
     open_gt_pair_idx = tf.compat.v1.placeholder(shape = (batch_size,256,2))
     return open_gt_256_64_idx,open_gt_mask,open_gt_type,open_gt_res, open_gt_sample_points, open_gt_valid_mask, open_gt_pair_idx
-'''
+
+def placeholder_inputs_31(batch_size,num_point):
+    pointclouds_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))  # input
+    labels_key_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))  # edge points label 0/1
+    labels_corner_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point)) 
+    #labels_direction = tf.placeholder(tf.int32,shape=(batch_size,num_point))
+    reg_edge_p = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))
+    reg_corner_p = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))
+#    labels_type = tf.placeholder(tf.int32,shape=(batch_size,num_point))
+#    simmat_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,num_point))
+#    neg_simmat_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,num_point))
+#    return pointclouds_pl,labels_key_p,labels_direction,regression_direction,regression_position,labels_type,simmat_pl,neg_simmat_pl
+    return pointclouds_pl, labels_key_p, labels_corner_p, reg_edge_p, reg_corner_p
+
 
 def get_model_32(point_cloud, is_training, bn_decay=None):
-    """ Classification PointNet, input is BxNx3, output BxNx? """
+    """ Classification/Segmentation/Regression PointNet """
     # Code from PointNet in "https://github.com/charlesq34/pointnet"
     # Implementation of Section 3.2.
 
@@ -86,7 +99,7 @@ def get_model_32(point_cloud, is_training, bn_decay=None):
                           scope='dp2')
     pred_open_curve_cls = tf_util.fully_connected(class_head, 2, activation_fn=None, scope='fc3')     # 0/1
 
-
+    # head 1: Segmentation, this determines wheter a particular point belongs to the candidate curve.
     global_feat_expand = tf.tile(global_feat, [1, num_point, 1, 1])
     concat_feat = tf.concat(3, [point_feat, global_feat_expand])
     net = tf_util.conv2d(concat_feat, 512, [1,1],
@@ -105,14 +118,13 @@ def get_model_32(point_cloud, is_training, bn_decay=None):
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
                          scope='conv9', bn_decay=bn_decay)
-    # head 1: Segmentation, this determines wheter a particular point belongs to the candidate curve.
+    
     seg_head = tf_util.conv2d(net, 2, [1,1],
                          padding='VALID', stride=[1,1], activation_fn=None,
                          scope='conv10')
     pred_open_curve_seg = tf.squeeze(seg_head, [2]) # BxNxC (e.g. 8x64x2)
 
-    # head 3: Regression, this identifies the parameters of the proposed curve.
-    # head 2: Classification, this determines wheter we need to generate a line, circle or BSpline.    
+    # head 3: Regression, this identifies the parameters of the proposed curve.    
     regression_head = tf_util.fully_connected(global_feat_reshape, 512, bn=True, is_training=is_training,
                                   scope='fc1', bn_decay=bn_decay)
     regression_head = tf_util.dropout(regression_head, keep_prob=0.7, is_training=is_training,
@@ -124,65 +136,6 @@ def get_model_32(point_cloud, is_training, bn_decay=None):
     pred_open_curve_reg = tf_util.fully_connected(regression_head, 9, activation_fn=None, scope='fc3') # 3 coordinates
     
     return pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points
-
-'''
-def get_stage_2(dof_feat,simmat_feat,dof_mask_pl,proposal_nx_pl,is_training,bn_decay=None):
-
-    dof_feat = tf_util.conv1d(dof_feat,512,1,padding='VALID',activation_fn = None,scope = 'stage2/task1/smat_fc1')
-    simmat_feat = tf_util.conv1d(simmat_feat,512,1,padding='VALID',activation_fn = None,scope = 'stage2/task1/dof_fc1')
-    proposal_nx_pl = tf.expand_dims(proposal_nx_pl,axis = -1)
-    proposal_nx_pl = tf.cast(tf.tile(proposal_nx_pl,[1,1,512]),tf.float32)
-    simmat_feat_mul = simmat_feat * proposal_nx_pl
-    simmat_feat_reduce = tf.reduce_max(simmat_feat_mul,axis=1)
-    simmat_feat_expand = tf.tile(tf.expand_dims(simmat_feat_reduce,axis=1),[1,4096,1])
-    simmat_feat_all = tf.reduce_max(simmat_feat,axis=1)
-    simmat_feat_all = tf.tile(tf.expand_dims(simmat_feat_all,axis=1),[1,4096,1])
-    all_feat = tf.concat([dof_feat,simmat_feat_expand],axis = 1)
-    dof_mask_pl = tf.expand_dims(dof_mask_pl,axis =-1)
-    dof_mask_pl = tf.cast(tf.tile(dof_mask_pl,[1,1,1024]),tf.float32)
-    all_feat = all_feat * dof_mask_pl
-    feat1 = tf_util.conv1d(all_feat,1024,1,padding='VALID',activation_fn = None,scope = 'stage2/task1/fc1')
-    feat2 = tf_util.conv1d(feat1,512,1,padding='VALID',activation_fn = None,scope = 'stage2/task1/fc2')
-    feat3 = tf_util.conv1d(feat2,256,1,padding='VALID',activation_fn = None,scope = 'stage2/task1/fc3')
-    pred_dof_score = tf_util.conv1d(feat3, 1,1, padding='VALID', activation_fn=None, scope='stage2/task1/fc4')
-    pred_dof_score = tf.nn.sigmoid(pred_dof_score, name='stage2/task_1/score')
-    pred_dof_score = tf.squeeze(pred_dof_score,axis = -1)
-    return pred_dof_score, all_feat
-'''
-
-def get_stage_2_loss(pred_dof_score,dof_score_pl,dof_mask_pl):
-    dof_mask_pl = tf.cast(dof_mask_pl,tf.float32)
-    dof_score_pl = tf.expand_dims(dof_score_pl,-1)
-    pred_dof_score = tf.expand_dims(pred_dof_score,axis = -1)
-    loss = tf.reduce_mean(tf.reduce_sum(tf.reduce_mean(smooth_l1_dist(pred_dof_score-dof_score_pl),axis=2)*dof_mask_pl, \
-                               axis = 1)/tf.reduce_sum(dof_mask_pl,axis=1))
-    return loss
-
-
-
-def placeholder_inputs_31(batch_size,num_point):
-    open_gt_256_64_idx = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
-    open_gt_mask = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
-    open_gt_type = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,1))
-    open_gt_res = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,6))
-    open_gt_sample_points = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,64,3))
-    open_gt_valid_mask = tf.compat.v1.placeholder(shape = (batch_size,256,1))
-    open_gt_pair_idx = tf.compat.v1.placeholder(shape = (batch_size,256,2))
-
-    #return open_gt_256_64_idx,open_gt_mask,open_gt_type,open_gt_res, open_gt_sample_points, open_gt_valid_mask, open_gt_pair_idx    
-
-    pointclouds_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))  # input
-    labels_key_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))  # edge points label 0/1
-    labels_corner_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point)) 
-    #labels_direction = tf.placeholder(tf.int32,shape=(batch_size,num_point))
-    reg_edge_p = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))
-    reg_corner_p = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))
-#    labels_type = tf.placeholder(tf.int32,shape=(batch_size,num_point))
-#    simmat_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,num_point))
-#    neg_simmat_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,num_point))
-#    return pointclouds_pl,labels_key_p,labels_direction,regression_direction,regression_position,labels_type,simmat_pl,neg_simmat_pl
-    return pointclouds_pl, labels_key_p, labels_corner_p, reg_edge_p, reg_corner_p, \
-        open_gt_256_64_idx,open_gt_mask,open_gt_type,open_gt_res, open_gt_sample_points, open_gt_valid_mask, open_gt_pair_idx
 
 def get_model_31(point_cloud, is_training, bn_decay=None):
     """ Part segmentation PointNet, input is BxNx6 (XYZ NormalX NormalY NormalZ), output Bx50 """
@@ -266,6 +219,41 @@ def get_model_31(point_cloud, is_training, bn_decay=None):
 #                                             pred_labels_type,pred_simmat,pred_conf_logits
     return pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p
 
+
+def get_stage_2_loss(pred_open_curve_seg, \
+                     pred_open_curve_cls, \
+                     pred_open_curve_reg, \
+                     end_points, \
+                     batch_open_gt_res, \
+                     batch_open_gt_sample_points, \
+                     batch_open_gt_256_64_idx, \
+                     batch_open_gt_mask, \
+                     batch_open_gt_valid_mask, \
+                     batch_open_gt_pair_idx, \
+                     batch_open_gt_type):
+    # Section 3.2 Open Curve Proposal Loss 
+    num_curves = tf.reduce_sum(tf.where(batch_open_gt_valid_mask == 1))
+
+    ## Segmentation(mask) Loss
+    batch_open_gt_256_64_idx = tf.concat([batch_open_gt_256_64_idx], axis = 0)
+    batch_open_gt_sample_points = tf.concat([batch_open_gt_sample_points], axis = 0)
+    batch_open_gt_valid_mask = tf.concat([batch_open_gt_valid_mask], axis = 0)
+    batch_open_gt_mask = tf.concat([batch_open_gt_mask], axis = 0)
+    batch_open_gt_pair_idx = tf.concat([batch_open_gt_pair_idx], axis = 0)
+
+    # change int to float
+    batch_open_gt_valid_mask = tf.cast(batch_open_gt_valid_mask, tf.float32)
+    batch_open_gt_mask = tf.cast(batch_open_gt_mask, tf.float32)
+
+    neg_batch_open_gt_valid_mask = tf.ones_like(batch_open_gt_valid_mask)-batch_open_gt_valid_mask
+    neg_batch_open_gt_mask = tf.ones_like(batch_open_gt_mask)-batch_open_gt_mask
+
+    pred_open_curve_seg
+
+    
+
+    return loss
+
 def get_stage_1_loss(pred_labels_edge_p, \
                      pred_labels_corner_p, \
                      labels_edge_p, \
@@ -273,72 +261,84 @@ def get_stage_1_loss(pred_labels_edge_p, \
                      pred_reg_edge_p, \
                      pred_reg_corner_p, \
                      reg_edge_p, \
-                     reg_corner_p,\
-                     pred_open_curve_seg, \
-                     pred_open_curve_cls, \
-                     pred_open_curve_reg, \
-                     end_points, \
-                     is_training_31,\
-                     is_training_32):
-    
-    assert is_training_31 != is_training_32
+                     reg_corner_p):
     # returns losses from Section 3.1.
-    if is_training_31:
-        batch_size = pred_labels_edge_p.get_shape()[0]
-        num_point = pred_labels_edge_p.get_shape()[1]
+    # batch_size = pred_labels_edge_p.get_shape()[0]
+    num_point = pred_labels_edge_p.get_shape()[1]
 
-        #loss: Section 3.1. edge
-        mask = tf.cast(labels_edge_p, tf.float32) # change int to float
-        neg_mask = tf.ones_like(mask)-mask
-        Np = tf.expand_dims(tf.reduce_sum(mask,axis=1),1)     
-        Ng = tf.expand_dims(tf.reduce_sum(neg_mask,axis=1),1)  
-        edge_3_1_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_labels_edge_p,labels = labels_edge_p)*(mask*(Ng/Np)+1))
-        edge_3_1_recall = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_edge_p,axis=2,output_type = tf.int32),\
-                            labels_edge_p),tf.float32)*mask,axis = 1)/tf.reduce_sum(mask,axis=1))
-        edge_3_1_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_edge_p,axis=2,output_type = tf.int32),\
-                            labels_edge_p),tf.float32),axis = 1)/num_point)
-        
-        #loss:task1_1: corner
-        mask_1_1 = tf.cast(labels_corner_p,tf.float32)
-        neg_mask_1_1 = tf.ones_like(mask_1_1)-mask_1_1
-        Np_1_1 = tf.expand_dims(tf.reduce_sum(mask_1_1,axis=1),1)     
-        Ng_1_1 = tf.expand_dims(tf.reduce_sum(neg_mask_1_1,axis=1),1) 
-        corner_3_1_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_labels_corner_p,labels = labels_corner_p)*(mask_1_1*(Ng_1_1/Np_1_1)+1))
-        corner_3_1_recall = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_corner_p,axis=2,output_type = tf.int32),\
-                            labels_corner_p),tf.float32)*mask_1_1,axis = 1)/tf.reduce_sum(mask_1_1,axis=1))
-        corner_3_1_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_corner_p,axis=2,output_type = tf.int32),\
-                            labels_corner_p),tf.float32),axis = 1)/num_point)
+    #loss: Section 3.1. edge
+    mask = tf.cast(labels_edge_p, tf.float32) # change int to float
+    neg_mask = tf.ones_like(mask)-mask
+    Np = tf.expand_dims(tf.reduce_sum(mask,axis=1),1)     
+    Ng = tf.expand_dims(tf.reduce_sum(neg_mask,axis=1),1)  
+    edge_3_1_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_labels_edge_p,labels = labels_edge_p)*(mask*(Ng/Np)+1))
+    edge_3_1_recall = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_edge_p,axis=2,output_type = tf.int32),\
+                        labels_edge_p),tf.float32)*mask,axis = 1)/tf.reduce_sum(mask,axis=1))
+    edge_3_1_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_edge_p,axis=2,output_type = tf.int32),\
+                        labels_edge_p),tf.float32),axis = 1)/num_point)
+    
+    #loss:task1_1: corner
+    mask_1_1 = tf.cast(labels_corner_p,tf.float32)
+    neg_mask_1_1 = tf.ones_like(mask_1_1)-mask_1_1
+    Np_1_1 = tf.expand_dims(tf.reduce_sum(mask_1_1,axis=1),1)     
+    Ng_1_1 = tf.expand_dims(tf.reduce_sum(neg_mask_1_1,axis=1),1) 
+    corner_3_1_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_labels_corner_p,labels = labels_corner_p)*(mask_1_1*(Ng_1_1/Np_1_1)+1))
+    corner_3_1_recall = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_corner_p,axis=2,output_type = tf.int32),\
+                        labels_corner_p),tf.float32)*mask_1_1,axis = 1)/tf.reduce_sum(mask_1_1,axis=1))
+    corner_3_1_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_corner_p,axis=2,output_type = tf.int32),\
+                        labels_corner_p),tf.float32),axis = 1)/num_point)
 
-        # regression edge & corner loss
-        reg_edge_3_1_loss = tf.reduce_mean(tf.reduce_sum(tf.reduce_mean(smooth_l1_dist(pred_reg_edge_p-reg_edge_p),axis=2)*mask, \
-                                axis = 1)/tf.reduce_sum(mask,axis=1))
-        reg_corner_3_1_loss = tf.reduce_mean(tf.reduce_sum(tf.reduce_mean(smooth_l1_dist(pred_reg_corner_p-reg_corner_p),axis=2)*mask_1_1, \
-                                axis = 1)/tf.reduce_sum(mask_1_1,axis=1))
-
-        # 
+    # regression edge & corner loss
+    reg_edge_3_1_loss = tf.reduce_mean(tf.reduce_sum(tf.reduce_mean(smooth_l1_dist(pred_reg_edge_p-reg_edge_p),axis=2)*mask, \
+                            axis = 1)/tf.reduce_sum(mask,axis=1))
+    reg_corner_3_1_loss = tf.reduce_mean(tf.reduce_sum(tf.reduce_mean(smooth_l1_dist(pred_reg_corner_p-reg_corner_p),axis=2)*mask_1_1, \
+                            axis = 1)/tf.reduce_sum(mask_1_1,axis=1))
 
 
-        # check for optimal lambda_edge to balance.
-        lambda_edge, lambda_corner  = 100.0, 100.0
+    # check for optimal lambda_edge to balance.
+    lambda_edge, lambda_corner  = 100.0, 100.0
 
-        # check if these are ok:
-        L_edge = edge_3_1_loss+lambda_edge*reg_edge_3_1_loss
-        L_corner = corner_3_1_loss+lambda_corner*reg_corner_3_1_loss
-        #L_edge = tf.add(edge_3_1_loss, lambda_edge*reg_edge_3_1_loss)
-        #L_corner = tf.add(corner_3_1_loss, lambda_corner*reg_corner_3_1_loss)
-        loss_31 = L_edge + L_corner
+    # check if these are ok:
+    L_edge = edge_3_1_loss+lambda_edge*reg_edge_3_1_loss
+    L_corner = corner_3_1_loss+lambda_corner*reg_corner_3_1_loss
+    #L_edge = tf.add(edge_3_1_loss, lambda_edge*reg_edge_3_1_loss)
+    #L_corner = tf.add(corner_3_1_loss, lambda_corner*reg_corner_3_1_loss)
+    loss_31 = L_edge + L_corner
 
-        tf.summary.scalar('all_loss', loss_31)
-        tf.compat.v1.add_to_collection('losses', loss_31)
-        '''
-        tf.compat.v1.add_to_collection('losses', edge_3_1_loss)
-        tf.compat.v1.add_to_collection('losses', corner_3_1_loss)
-        tf.compat.v1.add_to_collection('losses', lambda_edge*reg_edge_3_1_loss)
-        tf.compat.v1.add_to_collection('losses', lambda_corner*reg_corner_3_1_loss)
-        '''
+    tf.summary.scalar('all_loss', loss_31)
+    tf.compat.v1.add_to_collection('losses', loss_31)
+    '''
+    tf.compat.v1.add_to_collection('losses', edge_3_1_loss)
+    tf.compat.v1.add_to_collection('losses', corner_3_1_loss)
+    tf.compat.v1.add_to_collection('losses', lambda_edge*reg_edge_3_1_loss)
+    tf.compat.v1.add_to_collection('losses', lambda_corner*reg_corner_3_1_loss)
+    '''
 
-        #return task_1_loss,task_1_recall,task_1_acc,task_2_1_loss,task_2_1_acc,task_2_2_loss,task_3_loss,task_4_loss,task_4_acc,task_5_loss,task_6_loss,loss
-        return edge_3_1_loss, edge_3_1_recall, edge_3_1_acc, corner_3_1_loss, corner_3_1_recall, corner_3_1_acc, reg_edge_3_1_loss, reg_corner_3_1_loss, loss_31
+    #return task_1_loss,task_1_recall,task_1_acc,task_2_1_loss,task_2_1_acc,task_2_2_loss,task_3_loss,task_4_loss,task_4_acc,task_5_loss,task_6_loss,loss
+    return edge_3_1_loss, edge_3_1_recall, edge_3_1_acc, corner_3_1_loss, corner_3_1_recall, corner_3_1_acc, reg_edge_3_1_loss, reg_corner_3_1_loss, loss_31
 
-    elif is_training_32:
-        
+
+''' stage3?
+def get_stage_2(dof_feat,simmat_feat,dof_mask_pl,proposal_nx_pl,is_training,bn_decay=None):
+
+    dof_feat = tf_util.conv1d(dof_feat,512,1,padding='VALID',activation_fn = None,scope = 'stage2/task1/smat_fc1')
+    simmat_feat = tf_util.conv1d(simmat_feat,512,1,padding='VALID',activation_fn = None,scope = 'stage2/task1/dof_fc1')
+    proposal_nx_pl = tf.expand_dims(proposal_nx_pl,axis = -1)
+    proposal_nx_pl = tf.cast(tf.tile(proposal_nx_pl,[1,1,512]),tf.float32)
+    simmat_feat_mul = simmat_feat * proposal_nx_pl
+    simmat_feat_reduce = tf.reduce_max(simmat_feat_mul,axis=1)
+    simmat_feat_expand = tf.tile(tf.expand_dims(simmat_feat_reduce,axis=1),[1,4096,1])
+    simmat_feat_all = tf.reduce_max(simmat_feat,axis=1)
+    simmat_feat_all = tf.tile(tf.expand_dims(simmat_feat_all,axis=1),[1,4096,1])
+    all_feat = tf.concat([dof_feat,simmat_feat_expand],axis = 1)
+    dof_mask_pl = tf.expand_dims(dof_mask_pl,axis =-1)
+    dof_mask_pl = tf.cast(tf.tile(dof_mask_pl,[1,1,1024]),tf.float32)
+    all_feat = all_feat * dof_mask_pl
+    feat1 = tf_util.conv1d(all_feat,1024,1,padding='VALID',activation_fn = None,scope = 'stage2/task1/fc1')
+    feat2 = tf_util.conv1d(feat1,512,1,padding='VALID',activation_fn = None,scope = 'stage2/task1/fc2')
+    feat3 = tf_util.conv1d(feat2,256,1,padding='VALID',activation_fn = None,scope = 'stage2/task1/fc3')
+    pred_dof_score = tf_util.conv1d(feat3, 1,1, padding='VALID', activation_fn=None, scope='stage2/task1/fc4')
+    pred_dof_score = tf.nn.sigmoid(pred_dof_score, name='stage2/task_1/score')
+    pred_dof_score = tf.squeeze(pred_dof_score,axis = -1)
+    return pred_dof_score, all_feat
+'''

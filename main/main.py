@@ -248,13 +248,9 @@ def train():
     with tf.Graph().as_default():
         with tf.device('/cpu:0'):
             if STAGE==1 or STAGE==2:
-                
                 pointclouds_pl, labels_edge_p, labels_corner_p, reg_edge_p, reg_corner_p = MODEL.placeholder_inputs_31(BATCH_SIZE,NUM_POINT)
-
-                # 
                 open_gt_256_64_idx, open_gt_mask, open_gt_type, open_gt_res, \
-                    open_gt_sample_points, open_gt_valid_mask, open_gt_pair_idx, = MODEL.placeholder_inputs_32(BATCH_SIZE)
-                #
+                    open_gt_sample_points, open_gt_valid_mask, open_gt_pair_idx = MODEL.placeholder_inputs_32(BATCH_SIZE)
 
                 is_training_31 = tf.compat.v1.placeholder(tf.bool, shape=())
                 is_training_32 = tf.compat.v1.placeholder(tf.bool, shape=())
@@ -295,49 +291,93 @@ def train():
                     with tf.compat.v1.variable_scope(tf.compat.v1.get_variable_scope(), reuse=True):
                         with tf.device('/gpu:%d'%(i)), tf.compat.v1.name_scope('gpu_%d'%(i)) as scope:
                             # Evenly split input data to each GPU
-                            pc_batch = tf.slice(pointclouds_pl, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-
                             ## check if dimension numbers are correct:
-                            labels_edge_p_batch = tf.slice(labels_edge_p,[i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
-                            labels_corner_p_batch = tf.slice(labels_corner_p,[i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
-                            reg_edge_p_batch = tf.slice(reg_edge_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
-                            reg_corner_p_batch = tf.slice(reg_corner_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
+                            batch_pc = tf.slice(pointclouds_pl, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                            batch_labels_edge_p = tf.slice(labels_edge_p,[i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
+                            batch_labels_corner_p = tf.slice(labels_corner_p,[i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
+                            batch_reg_edge_p = tf.slice(reg_edge_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
+                            batch_reg_corner_p = tf.slice(reg_corner_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
 
-                            pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_31(pc_batch, is_training_31,STAGE,bn_decay=bn_decay)
+                            pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_31(batch_pc, is_training_31, bn_decay=bn_decay)
 
-                            batch_open_gt_sample_points, batch_256_64_idx, batch_open_gt_valid_mask, batch_corner_pairs_available = corner_pair_neighbor_search(pc_batch, pred_labels_corner_p)
-                            batch_open_gt_sample_points = tf.concat([tf.gather(batch_open_gt_sample_points[i], indices = tf.where(batch_open_gt_valid_mask[i])[:, 0], axis = 0) for i in range(len(batch_open_gt_sample_points))], axis = 0)
+                            # LOSS
+                            if STAGE == 1:
+                                edge_3_1_loss,   edge_3_1_recall,   edge_3_1_acc,\
+                                corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
+                                reg_edge_3_1_loss, reg_corner_3_1_loss, loss_31, loss = MODEL.get_stage_1_loss(pred_labels_edge_p, \
+                                                                                                               pred_labels_corner_p, \
+                                                                                                               batch_labels_edge_p, \
+                                                                                                               batch_labels_corner_p, \
+                                                                                                               pred_reg_edge_p, \
+                                                                                                               pred_reg_corner_p, \
+                                                                                                               batch_reg_edge_p, \
+                                                                                                               batch_reg_corner_p)
+                            elif STAGE == 2:
+                                # Debug
+                                batch_open_gt_res = tf.slice(open_gt_res, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                batch_open_gt_sample_points = tf.slice(open_gt_sample_points, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                batch_open_gt_256_64_idx = tf.slice(open_gt_256_64_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                batch_open_gt_mask = tf.slice(open_gt_mask, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                batch_open_gt_valid_mask = tf.slice(open_gt_valid_mask, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                batch_open_gt_pair_idx = tf.slice(open_gt_pair_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                batch_open_gt_type = tf.slice(open_gt_type, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                
+                            
+                                batch_open_gt_sample_points, batch_256_64_idx, batch_open_gt_valid_mask, batch_corner_pairs_available = corner_pair_neighbor_search(batch_pc, pred_labels_corner_p)
+                                
+                                # this concats all the batches. Debug this accordingly to enable backprop.
+                                batch_open_gt_sample_points = tf.concat([batch_open_gt_sample_points[i] for i in range(len(batch_open_gt_sample_points))], axis = 0) # this will be [2048, 64, 3]
+                                #batch_open_gt_sample_points = tf.concat([tf.gather(batch_open_gt_sample_points[i], indices = tf.where(batch_open_gt_valid_mask[i])[:, 0], axis = 0) for i in range(len(batch_open_gt_sample_points))], axis = 0)
+                                
+                                pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(batch_open_gt_sample_points, is_training_32, bn_decay=bn_decay)
+                                
+                                seg_3_2_loss,   seg_3_2_recall,   seg_3_2_acc,\
+                                corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
+                                reg_edge_3_1_loss, reg_corner_3_1_loss, loss_31, loss = MODEL.get_stage_2_loss(pred_open_curve_seg, \
+                                                                                                               pred_open_curve_cls, \
+                                                                                                               pred_open_curve_reg, \
+                                                                                                               end_points, \
+                                                                                                               batch_open_gt_res, \
+                                                                                                               batch_open_gt_sample_points, \
+                                                                                                               batch_open_gt_256_64_idx, \
+                                                                                                               batch_open_gt_mask, \
+                                                                                                               batch_open_gt_valid_mask, \
+                                                                                                               batch_open_gt_pair_idx, \
+                                                                                                               batch_open_gt_type,\
+                                                                                                               is_training_32)
+                            if STAGE == 1:
+                                tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_loss' % (i), edge_3_1_loss)
+                                tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_recall' % (i), edge_3_1_recall)
+                                tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_acc' % (i), edge_3_1_acc)                
+                                tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_loss' % (i), corner_3_1_loss)
+                                tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_recall' % (i), corner_3_1_recall)
+                                tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_acc' % (i), corner_3_1_acc)
+                                tf.compat.v1.summary.scalar('%d_GPU_reg_edge_3_1_loss' % (i), reg_edge_3_1_loss)
+                                tf.compat.v1.summary.scalar('%d_GPU_reg_corner_3_1_loss' % (i), reg_corner_3_1_loss)
+                                #tf.summary.scalar('labels_type_loss', task_4_loss)
+                                #tf.summary.scalar('labels_type_acc', task_4_acc)
+                                tf.compat.v1.summary.scalar('%d_GPU_loss'% (i), loss_31)
+                                grads = optimizer.compute_gradients(loss) # here's where the loss and gradients are covered.
+                                tower_grads.append(grads)
+
+                                ## check this: 
+                                # losses = tf.compat.v1.get_collection('losses', scope)
+                                # total_loss = tf.add_n(losses, name='total_loss')
+                                pred_labels_edge_p_gpu.append(pred_labels_edge_p)
+                                pred_labels_corner_p_gpu.append(pred_labels_corner_p)
+                                pred_reg_edge_p_gpu.append(pred_reg_edge_p)
+                                pred_reg_corner_p_gpu.append(pred_reg_corner_p)
+                                total_loss_gpu.append(loss)                                
+                            
+                            elif STAGE == 2:
+                                print()
+                            
                             '''
                             open_pre_mask, open_pre_class_logits, open_pre_res, \
                             open_pre_sample_points, open_ball_radius, open_ball_center, \
                             open_b_spline_curve_pre, open_line_curve_pre, \
                             = MODEL.get_model_32(pc_batch, is_training_pl, STAGE,bn_decay=bn_decay)
-                            '''
-                            pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(batch_open_gt_sample_points, is_training_32, STAGE,bn_decay=bn_decay)
-                            
 
-                            # LOSS
-                            edge_3_1_loss,   edge_3_1_recall,   edge_3_1_acc,\
-                            corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
-                            reg_edge_3_1_loss, reg_corner_3_1_loss, loss_31, loss = MODEL.get_stage_1_loss(pred_labels_edge_p, \
-                                                                                                pred_labels_corner_p, \
-                                                                                                labels_edge_p_batch, \
-                                                                                                labels_corner_p_batch, \
-                                                                                                pred_reg_edge_p, \
-                                                                                                pred_reg_corner_p, \
-                                                                                                reg_edge_p_batch, \
-                                                                                                reg_corner_p_batch, \
-                                                                                                pred_open_curve_seg, \
-                                                                                                pred_open_curve_cls, \
-                                                                                                pred_open_curve_reg, \
-                                                                                                end_points,
-                                                                                                is_training_31,
-                                                                                                is_training_32
-                                                                                                )
-
-
-
-                            '''
                             MODEL.get_stage_1_loss(pred_labels_edge_p, pred_labels_corner_p, labels_edge_p_batch, labels_corner_p_batch, \
                                                     pred_reg_edge_p, pred_reg_corner_p, reg_edge_p_batch, reg_corner_p_batch)
                             
@@ -346,18 +386,6 @@ def train():
                             for l in losses + [total_loss]:
                                 tf.compat.v1.summary.scalar(l.op.name, l)
                             '''
-                            
-                            tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_loss' % (i), edge_3_1_loss)
-                            tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_recall' % (i), edge_3_1_recall)
-                            tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_acc' % (i), edge_3_1_acc)                
-                            tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_loss' % (i), corner_3_1_loss)
-                            tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_recall' % (i), corner_3_1_recall)
-                            tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_acc' % (i), corner_3_1_acc)
-                            tf.compat.v1.summary.scalar('%d_GPU_reg_edge_3_1_loss' % (i), reg_edge_3_1_loss)
-                            tf.compat.v1.summary.scalar('%d_GPU_reg_corner_3_1_loss' % (i), reg_corner_3_1_loss)
-                            #tf.summary.scalar('labels_type_loss', task_4_loss)
-                            #tf.summary.scalar('labels_type_acc', task_4_acc)
-                            tf.compat.v1.summary.scalar('%d_GPU_loss'% (i), loss_31)
 
                             grads = optimizer.compute_gradients(loss) # here's where the loss and gradients are covered.
                             tower_grads.append(grads)
@@ -372,19 +400,20 @@ def train():
                             total_loss_gpu.append(loss)
                 
                 ## Merge pred and losses from multiple GPUs
-                pred_labels_edge_p = tf.concat(pred_labels_edge_p_gpu, 0)
-                pred_labels_corner_p = tf.concat(pred_labels_corner_p_gpu, 0)
-                pred_reg_edge_p = tf.concat(pred_reg_edge_p_gpu, 0)
-                pred_reg_corner_p = tf.concat(pred_reg_corner_p_gpu, 0)
-                total_loss = tf.reduce_mean(input_tensor = total_loss_gpu)
+                if STAGE == 1:
+                    pred_labels_edge_p = tf.concat(pred_labels_edge_p_gpu, 0)
+                    pred_labels_corner_p = tf.concat(pred_labels_corner_p_gpu, 0)
+                    pred_reg_edge_p = tf.concat(pred_reg_edge_p_gpu, 0)
+                    pred_reg_corner_p = tf.concat(pred_reg_corner_p_gpu, 0)
+                    total_loss = tf.reduce_mean(input_tensor = total_loss_gpu)
                 
-                # Get training operator
-                grads = average_gradients(tower_grads)
-                train_op = optimizer.apply_gradients(grads, global_step=batch)
-                # train_op = optimizer.minimize(loss, global_step=batch_stage_1)
+                    # Get training operator
+                    grads = average_gradients(tower_grads)
+                    train_op = optimizer.apply_gradients(grads, global_step=batch)
+                    # train_op = optimizer.minimize(loss, global_step=batch_stage_1)
 
-                # Add ops to save and restore all the variables.
-                saver = tf.compat.v1.train.Saver(max_to_keep=10)
+                    # Add ops to save and restore all the variables.
+                    saver = tf.compat.v1.train.Saver(max_to_keep=10)
 
             '''
             elif STAGE==2:
@@ -441,7 +470,7 @@ def train():
             sess.run(init)
             saver.restore(sess, BASE_DIR+'/stage_1_log/model100.ckpt')
         
-        if STAGE==1:
+        if STAGE==1 or STAGE == 2:
             ops = {'pointclouds_pl': pointclouds_pl,
                'labels_edge_p': labels_edge_p,
                'labels_corner_p': labels_corner_p,
@@ -451,7 +480,8 @@ def train():
                #'labels_type': labels_type,
                #'simmat_pl': simmat_pl,
                #'neg_simmat_pl': neg_simmat_pl,
-               'is_training_pl': is_training_pl,
+               'is_training_31': is_training_31,
+               'is_training_32': is_training_32,
                'pred_labels_edge_p': pred_labels_edge_p,                   #  'pred_labels_edge_points'
                'pred_labels_corner_p': pred_labels_corner_p, 
                #'pred_labels_direction': pred_labels_direction,
