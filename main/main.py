@@ -154,15 +154,15 @@ def corner_pair_neighbor_search(points_cloud, pred_corner):
     # eventually it has to return the tensor...    
     # open_gt_256_64_idx (DEVICE_BATCH_SIZE, 256, 64, dtype = uint16)
     corner_points = tf.where(pred_corner[..., 1] > 0.999)
-    batch_corner_pairs_available = [False]*DEVICE_BATCH_SIZE
-    batch_open_gt_valid_mask = []
+    corner_pair_available = [False]*DEVICE_BATCH_SIZE
+    corner_pair_valid_mask = []
 
     # organize corner_pairs per batch
     per_batch_corner_pairs = []
     for per_batch in tf.range(DEVICE_BATCH_SIZE, dtype = tf.int64):
         idx = tf.boolean_mask(corner_points, corner_points[:,0] == per_batch)[:,1]
         if idx.shape[0] > 1:
-            batch_corner_pairs_available[per_batch] = True
+            corner_pair_available[per_batch] = True
             idx_r = tf.repeat(idx, idx.shape[0])
             idx_b = tf.tile(idx, [idx.shape[0]])
             two_col = tf.stack([idx_r, idx_b], 1)
@@ -172,11 +172,11 @@ def corner_pair_neighbor_search(points_cloud, pred_corner):
             
 
     # per batch sample the points
-    batch_256_64_idx = []
-    batch_open_gt_sample_points = [] # (8, 256, 64, 3)
+    corner_pair_256_64_idx = []
+    corner_pair_sample_points = [] # (8, 256, 64, 3)
     for per_batch in tf.range(DEVICE_BATCH_SIZE, dtype = tf.int64):
         rest_num = 256
-        if batch_corner_pairs_available[per_batch]:
+        if corner_pair_available[per_batch]:
 
             # first increase the precision to float64, 
             # otherwise it may go wrong when it comes to finding points within radius, 
@@ -221,18 +221,18 @@ def corner_pair_neighbor_search(points_cloud, pred_corner):
                     idx_256_64.append(tf.expand_dims(idx_nums, axis = 0))
 
             if rest_num > 0: idx_256_64.append(tf.zeros((rest_num, 64), dtype = tf.int64))
-            batch_256_64_idx.append(tf.concat(idx_256_64, axis = 0))
-            batch_open_gt_sample_points.append(tf.gather(points_cloud[per_batch], indices=batch_256_64_idx[per_batch], axis=0))
+            corner_pair_256_64_idx.append(tf.concat(idx_256_64, axis = 0))
+            corner_pair_sample_points.append(tf.gather(points_cloud[per_batch], indices=corner_pair_256_64_idx[per_batch], axis=0))
         else:
-            batch_256_64_idx.append(tf.zeros((rest_num, 64), dtype = tf.int64))
-            batch_open_gt_sample_points.append(tf.zeros((rest_num, 64, 3), dtype = tf.float32))
+            corner_pair_256_64_idx.append(tf.zeros((rest_num, 64), dtype = tf.int64))
+            corner_pair_sample_points.append(tf.zeros((rest_num, 64, 3), dtype = tf.float32))
 
         open_gt_valid_mask = tf.expand_dims(tf.cast(tf.sequence_mask(256 - rest_num, 256), dtype=tf.uint8), axis = 1)
-        batch_open_gt_valid_mask.append(open_gt_valid_mask)
+        corner_pair_valid_mask.append(open_gt_valid_mask)
         # later use tf.gather(points_cloud[0], indices=batch_256_64[0], axis=0) to access the point cloud.
 
     # (8, 256, 64, 3)
-    return batch_open_gt_sample_points, batch_256_64_idx, batch_open_gt_valid_mask, batch_corner_pairs_available
+    return corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available
 
 def get_bn_decay(batch):
     bn_momentum = tf.compat.v1.train.exponential_decay(
@@ -313,7 +313,7 @@ def train():
                                                                                                                batch_reg_edge_p, \
                                                                                                                batch_reg_corner_p)
                             elif STAGE == 2:
-                                # Debug
+                                # GT
                                 batch_open_gt_res = tf.slice(open_gt_res, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 batch_open_gt_sample_points = tf.slice(open_gt_sample_points, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 batch_open_gt_256_64_idx = tf.slice(open_gt_256_64_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
@@ -323,13 +323,12 @@ def train():
                                 batch_open_gt_type = tf.slice(open_gt_type, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 
                             
-                                batch_open_gt_sample_points, batch_256_64_idx, batch_open_gt_valid_mask, batch_corner_pairs_available = corner_pair_neighbor_search(batch_pc, pred_labels_corner_p)
+                                corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available = corner_pair_neighbor_search(batch_pc, pred_labels_corner_p)
                                 
                                 # this concats all the batches. Debug this accordingly to enable backprop.
-                                batch_open_gt_sample_points = tf.concat([batch_open_gt_sample_points[i] for i in range(len(batch_open_gt_sample_points))], axis = 0) # this will be [2048, 64, 3]
-                                #batch_open_gt_sample_points = tf.concat([tf.gather(batch_open_gt_sample_points[i], indices = tf.where(batch_open_gt_valid_mask[i])[:, 0], axis = 0) for i in range(len(batch_open_gt_sample_points))], axis = 0)
+                                open_gt_proposal_sample_points = tf.concat([open_gt_proposal_sample_points[i] for i in range(len(open_gt_proposal_sample_points))], axis = 0) # this will be [2048, 64, 3]
                                 
-                                pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(batch_open_gt_sample_points, is_training_32, bn_decay=bn_decay)
+                                pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(open_gt_proposal_sample_points, is_training_32, bn_decay=bn_decay)
                                 
                                 seg_3_2_loss,   seg_3_2_recall,   seg_3_2_acc,\
                                 corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
