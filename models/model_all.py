@@ -29,7 +29,7 @@ def placeholder_inputs_32(batch_size):
 
 def placeholder_inputs_31(batch_size,num_point):
     pointclouds_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))  # input
-    labels_key_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))  # edge points label 0/1
+    labels_edge_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point))  # edge points label 0/1
     labels_corner_p = tf.compat.v1.placeholder(tf.int32,shape=(batch_size,num_point)) 
     #labels_direction = tf.placeholder(tf.int32,shape=(batch_size,num_point))
     reg_edge_p = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))
@@ -38,7 +38,7 @@ def placeholder_inputs_31(batch_size,num_point):
 #    simmat_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,num_point))
 #    neg_simmat_pl = tf.placeholder(tf.float32,shape=(batch_size,num_point,num_point))
 #    return pointclouds_pl,labels_key_p,labels_direction,regression_direction,regression_position,labels_type,simmat_pl,neg_simmat_pl
-    return pointclouds_pl, labels_key_p, labels_corner_p, reg_edge_p, reg_corner_p
+    return pointclouds_pl, labels_edge_p, labels_corner_p, reg_edge_p, reg_corner_p
 
 
 def get_model_32(point_cloud, is_training, bn_decay=None):
@@ -221,6 +221,8 @@ def get_model_31(point_cloud, is_training, bn_decay=None):
 
 
 def get_stage_2_loss(pred_open_curve_seg, \
+                     corner_pair_256_64_idx, \
+                     corner_pair_valid_mask, \
                      pred_open_curve_cls, \
                      pred_open_curve_reg, \
                      end_points, \
@@ -234,7 +236,7 @@ def get_stage_2_loss(pred_open_curve_seg, \
     # Section 3.2 Open Curve Proposal Loss 
     num_curves = tf.reduce_sum(tf.where(batch_open_gt_valid_mask == 1))
 
-    ## Segmentation(mask) Loss
+    ## Concat all the GT
     batch_open_gt_256_64_idx = tf.concat([batch_open_gt_256_64_idx], axis = 0)
     batch_open_gt_sample_points = tf.concat([batch_open_gt_sample_points], axis = 0)
     batch_open_gt_valid_mask = tf.concat([batch_open_gt_valid_mask], axis = 0)
@@ -242,17 +244,34 @@ def get_stage_2_loss(pred_open_curve_seg, \
     batch_open_gt_pair_idx = tf.concat([batch_open_gt_pair_idx], axis = 0)
 
     # change int to float
-    batch_open_gt_valid_mask = tf.cast(batch_open_gt_valid_mask, tf.float32)
-    batch_open_gt_mask = tf.cast(batch_open_gt_mask, tf.float32)
+    batch_open_gt_valid_mask = tf.cast(batch_open_gt_valid_mask, tf.float32) # (256, 1)
+    batch_open_gt_mask = tf.cast(batch_open_gt_mask, tf.float32) # (256, 64, 0/1)
 
     neg_batch_open_gt_valid_mask = tf.ones_like(batch_open_gt_valid_mask)-batch_open_gt_valid_mask
     neg_batch_open_gt_mask = tf.ones_like(batch_open_gt_mask)-batch_open_gt_mask
 
-    pred_open_curve_seg
 
+
+    '''
+    #loss: Section 3.1. edge
+    mask = tf.cast(labels_edge_p, tf.float32) # change int to float
+    neg_mask = tf.ones_like(mask)-mask
+    Np = tf.expand_dims(tf.reduce_sum(mask,axis=1),1)     
+    Ng = tf.expand_dims(tf.reduce_sum(neg_mask,axis=1),1)  
+    edge_3_1_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_labels_edge_p,labels = labels_edge_p)*(mask*(Ng/Np)+1))
+    edge_3_1_recall = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_edge_p,axis=2,output_type = tf.int32),\
+                        labels_edge_p),tf.float32)*mask,axis = 1)/tf.reduce_sum(mask,axis=1))
+    edge_3_1_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_edge_p,axis=2,output_type = tf.int32),\
+                        labels_edge_p),tf.float32),axis = 1)/num_point)
+    '''
+    # pred_open_curve_seg: (N*64*2)
+    labels_open_curve_seg = tf.zeros((pred_open_curve_seg.shape[0:2]), dtype = tf.int32)
     
 
-    return loss
+
+    seg_3_2_loss = tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_open_curve_seg, labels = labels_open_curve_seg)*corner_pair_valid_mask)/tf.reduce_sum(corner_pair_valid_mask)
+
+
 
 def get_stage_1_loss(pred_labels_edge_p, \
                      pred_labels_corner_p, \
@@ -267,7 +286,7 @@ def get_stage_1_loss(pred_labels_edge_p, \
     num_point = pred_labels_edge_p.get_shape()[1]
 
     #loss: Section 3.1. edge
-    mask = tf.cast(labels_edge_p, tf.float32) # change int to float
+    mask = tf.cast(labels_edge_p, tf.float32) # change int to float, labels_edpge_p: # batch_size,num_point
     neg_mask = tf.ones_like(mask)-mask
     Np = tf.expand_dims(tf.reduce_sum(mask,axis=1),1)     
     Ng = tf.expand_dims(tf.reduce_sum(neg_mask,axis=1),1)  

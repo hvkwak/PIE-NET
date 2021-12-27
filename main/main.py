@@ -231,7 +231,12 @@ def corner_pair_neighbor_search(points_cloud, pred_corner):
         corner_pair_valid_mask.append(open_gt_valid_mask)
         # later use tf.gather(points_cloud[0], indices=batch_256_64[0], axis=0) to access the point cloud.
 
-    # (8, 256, 64, 3)
+    # (8, 256, 64, 3), (8, 256, 64), (8, 256, 1)
+    # note that these are in a list. this should be first concatenated.
+    corner_pair_sample_points = tf.concat([corner_pair_sample_points[i] for i in range(len(corner_pair_sample_points))], axis = 0)
+    corner_pair_256_64_idx = tf.concat([corner_pair_256_64_idx[i] for i in range(len(corner_pair_256_64_idx))], axis = 0)
+    corner_pair_valid_mask = tf.concat([corner_pair_valid_mask[i] for i in range(len(corner_pair_valid_mask))], axis = 0)
+
     return corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available
 
 def get_bn_decay(batch):
@@ -277,8 +282,12 @@ def train():
                 # -------------------------------------------
                 # Allocating variables on CPU first will greatly accelerate multi-gpu training.
                 # Ref: https://github.com/kuza55/keras-extras/issues/21
-                MODEL.get_model_31(pointclouds_pl, is_training_31, bn_decay=bn_decay)
-                MODEL.get_model_32(pointclouds_pl, is_training_32, bn_decay=bn_decay)
+
+                # check if this works
+                _, pred_labels_corner_p, _, _ = MODEL.get_model_31(pointclouds_pl, is_training_31, bn_decay=bn_decay)
+                corner_pair_sample_points_pl, _, _, _ = corner_pair_neighbor_search(pointclouds_pl, pred_labels_corner_p)
+                corner_pair_sample_points_cloud_pl = tf.concat([corner_pair_sample_points_pl[i] for i in range(len(corner_pair_sample_points_pl))], axis = 0) # this will be [2048, 64, 3]
+                MODEL.get_model_32(corner_pair_sample_points_cloud_pl, is_training_32, bn_decay=bn_decay)
 
                 tower_grads = []
                 pred_labels_edge_p_gpu = []
@@ -326,13 +335,15 @@ def train():
                                 corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available = corner_pair_neighbor_search(batch_pc, pred_labels_corner_p)
                                 
                                 # this concats all the batches. Debug this accordingly to enable backprop.
-                                open_gt_proposal_sample_points = tf.concat([open_gt_proposal_sample_points[i] for i in range(len(open_gt_proposal_sample_points))], axis = 0) # this will be [2048, 64, 3]
+                                #open_gt_proposal_sample_points = tf.concat([open_gt_proposal_sample_points[i] for i in range(len(open_gt_proposal_sample_points))], axis = 0) # this will be [2048, 64, 3]
                                 
-                                pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(open_gt_proposal_sample_points, is_training_32, bn_decay=bn_decay)
+                                pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(corner_pair_sample_points, is_training_32, bn_decay=bn_decay)
                                 
                                 seg_3_2_loss,   seg_3_2_recall,   seg_3_2_acc,\
                                 corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
                                 reg_edge_3_1_loss, reg_corner_3_1_loss, loss_31, loss = MODEL.get_stage_2_loss(pred_open_curve_seg, \
+                                                                                                               corner_pair_256_64_idx, \
+                                                                                                               corner_pair_valid_mask, \
                                                                                                                pred_open_curve_cls, \
                                                                                                                pred_open_curve_reg, \
                                                                                                                end_points, \
