@@ -23,8 +23,8 @@ def placeholder_inputs_32(batch_size):
     open_gt_type = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,1))
     open_gt_res = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,6))
     open_gt_sample_points = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,64,3))
-    open_gt_valid_mask = tf.compat.v1.placeholder(shape = (batch_size,256,1))
-    open_gt_pair_idx = tf.compat.v1.placeholder(shape = (batch_size,256,2))
+    open_gt_valid_mask = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,1))
+    open_gt_pair_idx = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,2))
     return open_gt_256_64_idx,open_gt_mask,open_gt_type,open_gt_res, open_gt_sample_points, open_gt_valid_mask, open_gt_pair_idx
 
 def placeholder_inputs_31(batch_size,num_point):
