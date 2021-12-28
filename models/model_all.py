@@ -137,7 +137,7 @@ def get_model_32(point_cloud, is_training, bn_decay=None):
     
     return pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points
 
-def get_model_31(point_cloud, is_training, bn_decay=None):
+def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
     """ Part segmentation PointNet, input is BxNx6 (XYZ NormalX NormalY NormalZ), output Bx50 """
     batch_size = point_cloud.get_shape()[0]
     num_point = point_cloud.get_shape()[1]
@@ -171,7 +171,7 @@ def get_model_31(point_cloud, is_training, bn_decay=None):
     net = tf_util.conv1d(l0_points, 128, 1, padding='VALID', bn=True, is_training=is_training, scope='pointnet/fc1', bn_decay=bn_decay)
 
     end_points['feats'] = net 
-    if is_training:
+    if STAGE == 1:
     	net = tf_util.dropout(net, keep_prob=0.5, is_training=is_training, scope='pointnet/dp1')
     
     # dof_feature

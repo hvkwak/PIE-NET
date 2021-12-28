@@ -146,11 +146,6 @@ def get_learning_rate_stage_2(batch,base_learning_rate):
 
 def corner_pair_neighbor_search(points_cloud, pred_corner):
 
-    """take the corner pairs, find the middle point(center) of them and builds (sphere)neighbor within the radius(r) from the center.
-
-    Returns:
-        [type]: [description]
-    """    
     # eventually it has to return the tensor...    
     # open_gt_256_64_idx (DEVICE_BATCH_SIZE, 256, 64, dtype = uint16)
     corner_points = tf.where(pred_corner[..., 1] > 0.999)
@@ -159,8 +154,9 @@ def corner_pair_neighbor_search(points_cloud, pred_corner):
 
     # organize corner_pairs per batch
     per_batch_corner_pairs = []
-    for per_batch in tf.range(DEVICE_BATCH_SIZE, dtype = tf.int64):
-        idx = tf.boolean_mask(corner_points, corner_points[:,0] == per_batch)[:,1]
+    for per_batch in range(DEVICE_BATCH_SIZE):
+        idx = tf.boolean_mask(corner_points, tf.math.equal(corner_points[:,0], per_batch))[:,1]
+        #idx = tf.boolean_mask(corner_points, corner_points[:,0] == per_batch)[:,1]
         if idx.shape[0] > 1:
             corner_pair_available[per_batch] = True
             idx_r = tf.repeat(idx, idx.shape[0])
@@ -284,8 +280,8 @@ def train():
                 # Ref: https://github.com/kuza55/keras-extras/issues/21
 
                 # check if this works
-                _, pred_labels_corner_p, _, _ = MODEL.get_model_31(pointclouds_pl, is_training_31, bn_decay=bn_decay)
-                corner_pair_sample_points_pl, _, _, _ = corner_pair_neighbor_search(pointclouds_pl, pred_labels_corner_p)
+                pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_31(pointclouds_pl, is_training_31, STAGE, bn_decay=bn_decay)
+                corner_pair_sample_points_pl, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available = corner_pair_neighbor_search(pointclouds_pl, pred_labels_corner_p)
                 corner_pair_sample_points_cloud_pl = tf.concat([corner_pair_sample_points_pl[i] for i in range(len(corner_pair_sample_points_pl))], axis = 0) # this will be [2048, 64, 3]
                 MODEL.get_model_32(corner_pair_sample_points_cloud_pl, is_training_32, bn_decay=bn_decay)
 
@@ -331,7 +327,6 @@ def train():
                                 batch_open_gt_pair_idx = tf.slice(open_gt_pair_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 batch_open_gt_type = tf.slice(open_gt_type, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 
-                            
                                 corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available = corner_pair_neighbor_search(batch_pc, pred_labels_corner_p)
                                 
                                 # this concats all the batches. Debug this accordingly to enable backprop.
