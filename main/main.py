@@ -39,6 +39,7 @@ parser.add_argument('--optimizer', default='adam', help='adam or momentum [defau
 parser.add_argument('--decay_step', type=int, default=200000, help='Decay step for lr decay [default: 200000]')
 parser.add_argument('--decay_rate', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
 parser.add_argument('--stage',type=int,default=1,help='network stage')
+parser.add_argument('--resume',type=int,default=0,help='resume training')
 FLAGS = parser.parse_args()
 
 EPOCH_CNT = 0
@@ -58,6 +59,7 @@ DECAY_RATE = FLAGS.decay_rate
 # STAGE = 1: Training, Section 3.1.
 # STAGE = 2: Training, Section 3.2.
 STAGE = FLAGS.stage
+RESUME = FLAGS.resume
 
 MODEL = importlib.import_module(FLAGS.model) # import network module
 MODEL_FILE = os.path.join(ROOT_DIR, 'models', FLAGS.model+'.py')
@@ -149,12 +151,12 @@ def corner_pair_neighbor_search(points_cloud, pred_corner):
     # eventually it has to return the tensor...    
     # open_gt_256_64_idx (DEVICE_BATCH_SIZE, 256, 64, dtype = uint16)
     corner_points = tf.where(pred_corner[..., 1] > 0.999)
-    corner_pair_available = [False]*DEVICE_BATCH_SIZE
+    corner_pair_available = [False]*BATCH_SIZE
     corner_pair_valid_mask = []
 
     # organize corner_pairs per batch
     per_batch_corner_pairs = []
-    for per_batch in range(DEVICE_BATCH_SIZE):
+    for per_batch in range(BATCH_SIZE):
         idx = tf.boolean_mask(corner_points, tf.math.equal(corner_points[:,0], per_batch))[:,1]
         #idx = tf.boolean_mask(corner_points, corner_points[:,0] == per_batch)[:,1]
         if idx.shape[0] > 1:
@@ -170,7 +172,7 @@ def corner_pair_neighbor_search(points_cloud, pred_corner):
     # per batch sample the points
     corner_pair_256_64_idx = []
     corner_pair_sample_points = [] # (8, 256, 64, 3)
-    for per_batch in tf.range(DEVICE_BATCH_SIZE, dtype = tf.int64):
+    for per_batch in tf.range(BATCH_SIZE, dtype = tf.int64):
         rest_num = 256
         if corner_pair_available[per_batch]:
 
@@ -227,7 +229,7 @@ def corner_pair_neighbor_search(points_cloud, pred_corner):
         corner_pair_valid_mask.append(open_gt_valid_mask)
         # later use tf.gather(points_cloud[0], indices=batch_256_64[0], axis=0) to access the point cloud.
 
-    # (8, 256, 64, 3), (8, 256, 64), (8, 256, 1)
+    # (32, 256, 64, 3), (32, 256, 64), (32, 256, 1)
     # note that these are in a list. this should be first concatenated.
     corner_pair_sample_points = tf.concat([corner_pair_sample_points[i] for i in range(len(corner_pair_sample_points))], axis = 0)
     corner_pair_256_64_idx = tf.concat([corner_pair_256_64_idx[i] for i in range(len(corner_pair_256_64_idx))], axis = 0)
@@ -250,8 +252,9 @@ def train():
         with tf.device('/cpu:0'):
             if STAGE==1 or STAGE==2:
                 pointclouds_pl, labels_edge_p, labels_corner_p, reg_edge_p, reg_corner_p = MODEL.placeholder_inputs_31(BATCH_SIZE,NUM_POINT)
-                open_gt_256_64_idx, open_gt_mask, open_gt_type, open_gt_res, \
-                    open_gt_sample_points, open_gt_valid_mask, open_gt_pair_idx = MODEL.placeholder_inputs_32(BATCH_SIZE)
+                open_gt_corner_pair_sample_points_pl, open_gt_corner_pair_sample_points_label = MODEL.placeholder_inputs_32(BATCH_SIZE)
+                #open_gt_corner_pair_sample_points_pl, open_gt_256_64_idx, open_gt_mask, open_gt_type, open_gt_res, \
+                #    open_gt_sample_points, open_gt_valid_mask, open_gt_pair_idx = MODEL.placeholder_inputs_32(BATCH_SIZE)
 
                 is_training_31 = tf.compat.v1.placeholder(tf.bool, shape=())
                 is_training_32 = tf.compat.v1.placeholder(tf.bool, shape=())
@@ -280,16 +283,27 @@ def train():
                 # Ref: https://github.com/kuza55/keras-extras/issues/21
 
                 # check if this works
-                pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_31(pointclouds_pl, is_training_31, STAGE, bn_decay=bn_decay)
-                corner_pair_sample_points_pl, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available = corner_pair_neighbor_search(pointclouds_pl, pred_labels_corner_p)
-                corner_pair_sample_points_cloud_pl = tf.concat([corner_pair_sample_points_pl[i] for i in range(len(corner_pair_sample_points_pl))], axis = 0) # this will be [2048, 64, 3]
-                MODEL.get_model_32(corner_pair_sample_points_cloud_pl, is_training_32, bn_decay=bn_decay)
+                MODEL.get_model_31(pointclouds_pl, is_training_31, STAGE, bn_decay=bn_decay)
+                if STAGE == 2:
+                    MODEL.get_model_32(open_gt_corner_pair_sample_points_pl, is_training_32, bn_decay=bn_decay)
+                #pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_31(pointclouds_pl, is_training_31, STAGE, bn_decay=bn_decay)
+                #corner_pair_sample_points_pl, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available = corner_pair_neighbor_search(pointclouds_pl, pred_labels_corner_p)
+                #corner_pair_sample_points_cloud_pl = tf.concat([corner_pair_sample_points_pl[i] for i in range(len(corner_pair_sample_points_pl))], axis = 0) # this will be [2048, 64, 3]
+                #MODEL.get_model_32(corner_pair_sample_points_cloud_pl, is_training_32, bn_decay=bn_decay)
 
                 tower_grads = []
+
+                # Sec. 3.1
                 pred_labels_edge_p_gpu = []
                 pred_labels_corner_p_gpu = []
                 pred_reg_edge_p_gpu = []
                 pred_reg_corner_p_gpu = []
+
+                # Sec. 3.2
+                pred_seg_p_gpu = []
+                pred_cls_p_gpu = []
+                pred_reg_p_gpu = []
+
                 total_loss_gpu = []
 
                 for i in range(NUM_GPUS):
@@ -304,12 +318,11 @@ def train():
                             batch_reg_corner_p = tf.slice(reg_corner_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
 
                             pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_31(batch_pc, is_training_31, bn_decay=bn_decay)
-
                             # LOSS
                             if STAGE == 1:
                                 edge_3_1_loss,   edge_3_1_recall,   edge_3_1_acc,\
                                 corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
-                                reg_edge_3_1_loss, reg_corner_3_1_loss, loss_31, loss = MODEL.get_stage_1_loss(pred_labels_edge_p, \
+                                reg_edge_3_1_loss, reg_corner_3_1_loss, loss_31 = MODEL.get_stage_1_loss(pred_labels_edge_p, \
                                                                                                                pred_labels_corner_p, \
                                                                                                                batch_labels_edge_p, \
                                                                                                                batch_labels_corner_p, \
@@ -317,39 +330,37 @@ def train():
                                                                                                                pred_reg_corner_p, \
                                                                                                                batch_reg_edge_p, \
                                                                                                                batch_reg_corner_p)
-                            elif STAGE == 2:
+                            elif STAGE == 2: # Section 3.2.
                                 # GT
+                                batch_open_gt_corner_pair_sample_points_pl = tf.slice(open_gt_corner_pair_sample_points_pl, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                batch_open_gt_corner_pair_sample_points_label = tf.slice(open_gt_corner_pair_sample_points_label, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+
+                                # maybe we don't need these:
+                                batch_open_gt_256_64_idx = tf.slice(open_gt_256_64_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 batch_open_gt_res = tf.slice(open_gt_res, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 batch_open_gt_sample_points = tf.slice(open_gt_sample_points, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-                                batch_open_gt_256_64_idx = tf.slice(open_gt_256_64_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 batch_open_gt_mask = tf.slice(open_gt_mask, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 batch_open_gt_valid_mask = tf.slice(open_gt_valid_mask, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 batch_open_gt_pair_idx = tf.slice(open_gt_pair_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 batch_open_gt_type = tf.slice(open_gt_type, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                #
                                 
-                                corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available = corner_pair_neighbor_search(batch_pc, pred_labels_corner_p)
+                                pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(batch_open_gt_corner_pair_sample_points_pl, is_training_32, bn_decay=bn_decay)
                                 
-                                # this concats all the batches. Debug this accordingly to enable backprop.
-                                #open_gt_proposal_sample_points = tf.concat([open_gt_proposal_sample_points[i] for i in range(len(open_gt_proposal_sample_points))], axis = 0) # this will be [2048, 64, 3]
-                                
-                                pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(corner_pair_sample_points, is_training_32, bn_decay=bn_decay)
-                                
-                                seg_3_2_loss,   seg_3_2_recall,   seg_3_2_acc,\
-                                corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
-                                reg_edge_3_1_loss, reg_corner_3_1_loss, loss_31, loss = MODEL.get_stage_2_loss(pred_open_curve_seg, \
-                                                                                                               corner_pair_256_64_idx, \
-                                                                                                               corner_pair_valid_mask, \
-                                                                                                               pred_open_curve_cls, \
-                                                                                                               pred_open_curve_reg, \
-                                                                                                               end_points, \
-                                                                                                               batch_open_gt_res, \
-                                                                                                               batch_open_gt_sample_points, \
-                                                                                                               batch_open_gt_256_64_idx, \
-                                                                                                               batch_open_gt_mask, \
-                                                                                                               batch_open_gt_valid_mask, \
-                                                                                                               batch_open_gt_pair_idx, \
-                                                                                                               batch_open_gt_type,\
-                                                                                                               is_training_32)
+                                seg_3_2_loss, seg_3_2_recall, seg_3_2_acc = MODEL.get_stage_2_loss(pred_open_curve_seg, \
+                                                                                                    batch_open_gt_corner_pair_sample_points_label, \
+                                                                                                    #corner_pair_valid_mask, \
+                                                                                                    #pred_open_curve_cls, \
+                                                                                                    #pred_open_curve_reg, \
+                                                                                                    #end_points, \
+                                                                                                    #batch_open_gt_res, \
+                                                                                                    #batch_open_gt_sample_points, \
+                                                                                                    #batch_open_gt_256_64_idx, \
+                                                                                                    #batch_open_gt_mask, \
+                                                                                                    #batch_open_gt_valid_mask, \
+                                                                                                    #batch_open_gt_pair_idx, \
+                                                                                                    #batch_open_gt_type,\
+                                                                                                    is_training_32)
                             if STAGE == 1:
                                 tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_loss' % (i), edge_3_1_loss)
                                 tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_recall' % (i), edge_3_1_recall)
@@ -359,10 +370,8 @@ def train():
                                 tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_acc' % (i), corner_3_1_acc)
                                 tf.compat.v1.summary.scalar('%d_GPU_reg_edge_3_1_loss' % (i), reg_edge_3_1_loss)
                                 tf.compat.v1.summary.scalar('%d_GPU_reg_corner_3_1_loss' % (i), reg_corner_3_1_loss)
-                                #tf.summary.scalar('labels_type_loss', task_4_loss)
-                                #tf.summary.scalar('labels_type_acc', task_4_acc)
                                 tf.compat.v1.summary.scalar('%d_GPU_loss'% (i), loss_31)
-                                grads = optimizer.compute_gradients(loss) # here's where the loss and gradients are covered.
+                                grads = optimizer.compute_gradients(loss_31) # here's where the loss and gradients are covered.
                                 tower_grads.append(grads)
 
                                 ## check this: 
@@ -372,37 +381,41 @@ def train():
                                 pred_labels_corner_p_gpu.append(pred_labels_corner_p)
                                 pred_reg_edge_p_gpu.append(pred_reg_edge_p)
                                 pred_reg_corner_p_gpu.append(pred_reg_corner_p)
-                                total_loss_gpu.append(loss)                                
+                                total_loss_gpu.append(loss_31)
                             
                             elif STAGE == 2:
-                                print()
+                                tf.compat.v1.summary.scalar('%d_GPU_seg_3_2_loss' % (i), seg_3_2_loss)
+                                tf.compat.v1.summary.scalar('%d_GPU_seg_3_2_recall' % (i), seg_3_2_recall)
+                                tf.compat.v1.summary.scalar('%d_GPU_seg_3_2_acc' % (i), seg_3_2_acc)
+                                tf.compat.v1.summary.scalar('%d_GPU_loss'% (i), seg_3_2_loss)
+                                grads = optimizer.compute_gradients(seg_3_2_loss) # here's where the loss and gradients are covered.
+                                tower_grads.append(grads)
+
+
+                                pred_seg_p_gpu.append(pred_open_curve_seg)
+                                pred_cls_p_gpu.append(pred_open_curve_cls)
+                                pred_reg_p_gpu.append(pred_open_curve_reg)
+                                total_loss_gpu.append(seg_3_2_loss)
+
+
+                                ## check this: 
+                                # losses = tf.compat.v1.get_collection('losses', scope)
+                                # total_loss = tf.add_n(losses, name='total_loss')
                             
-                            '''
-                            open_pre_mask, open_pre_class_logits, open_pre_res, \
-                            open_pre_sample_points, open_ball_radius, open_ball_center, \
-                            open_b_spline_curve_pre, open_line_curve_pre, \
-                            = MODEL.get_model_32(pc_batch, is_training_pl, STAGE,bn_decay=bn_decay)
+                                '''
+                                open_pre_mask, open_pre_class_logits, open_pre_res, \
+                                open_pre_sample_points, open_ball_radius, open_ball_center, \
+                                open_b_spline_curve_pre, open_line_curve_pre, \
+                                = MODEL.get_model_32(pc_batch, is_training_pl, STAGE,bn_decay=bn_decay)
 
-                            MODEL.get_stage_1_loss(pred_labels_edge_p, pred_labels_corner_p, labels_edge_p_batch, labels_corner_p_batch, \
-                                                    pred_reg_edge_p, pred_reg_corner_p, reg_edge_p_batch, reg_corner_p_batch)
-                            
-                            losses = tf.compat.v1.get_collection('losses', scope)
-                            total_loss = tf.add_n(losses, name='total_loss')
-                            for l in losses + [total_loss]:
-                                tf.compat.v1.summary.scalar(l.op.name, l)
-                            '''
-
-                            grads = optimizer.compute_gradients(loss) # here's where the loss and gradients are covered.
-                            tower_grads.append(grads)
-
-                            ## check this: 
-                            # losses = tf.compat.v1.get_collection('losses', scope)
-                            # total_loss = tf.add_n(losses, name='total_loss')
-                            pred_labels_edge_p_gpu.append(pred_labels_edge_p)
-                            pred_labels_corner_p_gpu.append(pred_labels_corner_p)
-                            pred_reg_edge_p_gpu.append(pred_reg_edge_p)
-                            pred_reg_corner_p_gpu.append(pred_reg_corner_p)
-                            total_loss_gpu.append(loss)
+                                MODEL.get_stage_1_loss(pred_labels_edge_p, pred_labels_corner_p, labels_edge_p_batch, labels_corner_p_batch, \
+                                                        pred_reg_edge_p, pred_reg_corner_p, reg_edge_p_batch, reg_corner_p_batch)
+                                
+                                losses = tf.compat.v1.get_collection('losses', scope)
+                                total_loss = tf.add_n(losses, name='total_loss')
+                                for l in losses + [total_loss]:
+                                    tf.compat.v1.summary.scalar(l.op.name, l)
+                                '''
                 
                 ## Merge pred and losses from multiple GPUs
                 if STAGE == 1:
@@ -419,7 +432,16 @@ def train():
 
                     # Add ops to save and restore all the variables.
                     saver = tf.compat.v1.train.Saver(max_to_keep=10)
+                
+                elif STAGE == 2:
+                    pred_open_curve_seg = tf.concat(pred_seg_p_gpu, 0)
 
+                    # Get training operator
+                    grads = average_gradients(tower_grads)
+                    train_op = optimizer.apply_gradients(grads, global_step=batch)
+
+                    # Add ops to save and restore all the variables.
+                    saver = tf.compat.v1.train.Saver(max_to_keep=10)
             '''
             elif STAGE==2:
                 print('stage_2')
@@ -467,10 +489,10 @@ def train():
         
         
         # Init variables
-        if STAGE == 1:
+        if RESUME == 0:
             init = tf.compat.v1.global_variables_initializer()
             sess.run(init)
-        else:
+        elif RESUME == 1:
             init = tf.compat.v1.global_variables_initializer()
             sess.run(init)
             saver.restore(sess, BASE_DIR+'/stage_1_log/model100.ckpt')
@@ -482,6 +504,8 @@ def train():
                #'labels_direction': labels_direction,
                'reg_edge_p': reg_edge_p,
                'reg_corner_p': reg_corner_p,
+               'open_gt_corner_pair_sample_points_pl': open_gt_corner_pair_sample_points_pl,
+               'pred_open_curve_seg': pred_open_curve_seg,
                #'labels_type': labels_type,
                #'simmat_pl': simmat_pl,
                #'neg_simmat_pl': neg_simmat_pl,
@@ -503,6 +527,9 @@ def train():
                'corner_3_1_acc': corner_3_1_acc, 
                'reg_edge_3_1_loss': reg_edge_3_1_loss,
                'reg_corner_3_1_loss': reg_corner_3_1_loss,
+               'seg_3_2_loss': seg_3_2_loss,
+               'seg_3_2_recall': seg_3_2_recall,
+               'seg_3_2_acc': seg_3_2_acc,
                #'task_2_2_loss': task_2_2_loss,
                #'task_3_loss': task_3_loss,
                #'task_4_loss': task_4_loss,
@@ -516,7 +543,7 @@ def train():
                #'end_points': end_points
             for epoch in range(MAX_EPOCH):
                 log_string('**** TRAIN EPOCH %03d ****' % (epoch))
-                train_one_epoch_stage_1(sess,ops,train_writer)
+                train_one_epoch(sess,ops,train_writer)
                 sys.stdout.flush()
                 log_string('**** TEST EPOCH %03d ****' % (epoch))
                 eval_one_epoch(sess, ops, test_writer)
@@ -551,9 +578,9 @@ def train():
                     log_string("Model saved in file: %s" % save_path)
         '''
 
-def train_one_epoch_stage_1(sess, ops, train_writer):
-    is_training_31 = STAGE == 1
-    is_training_32 = STAGE == 2
+def train_one_epoch(sess, ops, train_writer):
+    is_training_31 = STAGE == 1 # train until Sec. 3.1.
+    is_training_32 = STAGE == 2 # train until Sec. 3.2.
     train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/train_data/new_train/'), '*.mat')
     matrix_num = len(train_matrices_names_list)
     permutation = np.random.permutation(matrix_num)
@@ -573,8 +600,10 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
             print(train_data.shape)
 
         #push_eval(train_data, ops, sess, train_writer, is_training)
-        num_data = train_data.shape[0]
-        num_batch = num_data // BATCH_SIZE
+        # num_data = 64*4 = 256
+        # num_batch = 256 // 32 = 8
+        num_data = train_data.shape[0]  # = 256
+        num_batch = num_data // BATCH_SIZE   # 256 // 32 = 8
         total_loss = 0.0
         total_edge_3_1_loss = 0.0
         total_edge_3_1_recall = 0.0
@@ -584,6 +613,9 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
         total_corner_3_1_acc = 0.0
         total_reg_edge_3_1_loss = 0.0
         total_reg_corner_3_1_loss = 0.0
+        total_seg_3_2_loss = 0.0
+        total_cls_3_2_loss = 0.0
+        total_reg_3_2_loss = 0.0
 #        total_task_2_2_loss = 0.0
 #        total_task_3_loss = 0.0
 #        total_task_4_loss = 0.0
@@ -591,17 +623,32 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
 #        total_task_5_loss = 0.0
 #        total_task_6_loss = 0.0
         process_start_time = time.time()
+        pred_labels_edge_p_val = np.zeros((num_data, NUM_POINT, 2), np.float32)
+        pred_labels_corner_p_val = np.zeros((num_data, NUM_POINT, 2), np.float32)
+        pred_reg_edge_p_val = np.zeros((num_data, NUM_POINT, 3), np.float32)
+        pred_reg_corner_p_val = np.zeros((num_data, NUM_POINT, 3), np.float32)
+        pred_open_curve_seg_val = np.zeros((num_data*256, NUM_POINT, 3), np.float32)
+
         np.random.shuffle(train_data)
         for j in range(num_batch):
             begin_idx = j*BATCH_SIZE
             end_idx = (j+1)*BATCH_SIZE
             data_cells = train_data[begin_idx: end_idx,0]
+
             batch_inputs = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)  # input point clouds  # original code  =6
             batch_labels_edge_p = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)  # edge point label 0/1
             batch_labels_corner_p = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)  # edge point label 0/1
-            #batch_labels_direction = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
             batch_regression_edge = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)  # each point normal estimation
             batch_regression_corner = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)
+
+            batch_open_gt_256_64_idx = np.zeros((BATCH_SIZE, 256, 64), np.int32)
+            batch_open_gt_mask = np.zeros((BATCH_SIZE, 256, 64), np.int32)
+            batch_open_gt_type = np.zeros((BATCH_SIZE, 256, 1), np.int32)
+            batch_open_gt_res = np.zeros((BATCH_SIZE, 256, 6), np.float32)
+            batch_open_gt_sample_points = np.zeros((BATCH_SIZE,256, 64, 3), np.float32)
+            batch_open_gt_valid_mask = np.zeros((BATCH_SIZE,256, 1), np.int32)
+            batch_open_gt_pair_idx = np.zeros((BATCH_SIZE,256, 2), np.int32)
+
             #batch_labels_type = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
             #batch_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
             #batch_neg_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
@@ -628,8 +675,9 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
                          #ops['labels_type']: batch_labels_type,
                          #ops['simmat_pl']: batch_simmat_pl,
                          #ops['neg_simmat_pl']: batch_neg_simmat_pl,
-                         ops['is_training_31']: is_training_31,
-                         ops['is_training_32']: is_training_32}
+                         #ops['is_training_32']: is_training_32}
+                         ops['is_training_31']: is_training_31}
+                         
                  
                     
 #            summary, step, _, task_1_loss_val,task_1_recall_val,task_1_acc_val,task_2_1_loss_val,task_2_1_acc_val,task_2_2_loss_val, \
@@ -637,15 +685,50 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
 #                                 task_6_loss_val, loss_val = sess.run([ops['merged'], ops['step'], \
 #                                 ops['train_op'], ops['task_1_loss'], ops['task_1_recall'],ops['task_1_acc'],ops['task_2_1_loss'], \
 #                                 ops['task_2_1_acc'],ops['task_2_2_loss'],ops['task_3_loss'],ops['task_4_loss'], \
-#                                 ops['task_4_acc'],ops['task_5_loss'],ops['task_6_loss'],ops['loss']],feed_dict=feed_dict)
-            summary, step, _, edge_3_1_loss_val, edge_3_1_recall_val, edge_3_1_acc_val, \
+#                                 ops['task_4_acc'],ops['task_5_loss'],ops['task_6_loss'],ops['loss']],feed_dict=feed_dict)            
+            
+            summary, step, _, \
+            edge_3_1_loss_val, edge_3_1_recall_val, edge_3_1_acc_val, \
             corner_3_1_loss_val, corner_3_1_recall_val, corner_3_1_acc_val, \
-                reg_edge_3_1_loss_val, reg_corner_3_1_loss_val, loss_val = \
+            reg_edge_3_1_loss_val, reg_corner_3_1_loss_val, loss_val, \
+            pred_labels_edge_p_val[begin_idx:end_idx,:,:], pred_labels_corner_p_val[begin_idx:end_idx,:,:], \
+            pred_reg_edge_p_val[begin_idx:end_idx,:,:], pred_reg_corner_p_val[begin_idx:end_idx,:,:] = \
                 sess.run([ops['merged'], ops['step'], ops['train_op'], \
                     ops['edge_3_1_loss'], ops['edge_3_1_recall'], ops['edge_3_1_acc'],\
                     ops['corner_3_1_loss'], ops['corner_3_1_recall'], ops['corner_3_1_acc'],\
-                    ops['reg_edge_3_1_loss'], ops['reg_corner_3_1_loss'], ops['loss']],feed_dict=feed_dict)
-            
+                    ops['reg_edge_3_1_loss'], ops['reg_corner_3_1_loss'], ops['loss'], \
+                    ops['pred_labels_edge_p'], ops['pred_labels_corner_p'], \
+                    ops['pred_reg_edge_p'], ops['pred_reg_corner_p']],feed_dict=feed_dict)
+            if STAGE == 2:
+                # end_idx - begin_idx = 32
+                corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available = corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val[begin_idx:end_idx,:,:])
+
+                corner_pair_sample_points_label = corner_pair_label_generator()
+
+                corner_pair_sample_points = tf.concat([corner_pair_sample_points[i] for i in range(len(corner_pair_sample_points))], axis = 0) # this will be [N, 64, 3]
+                corner_pair_sample_points_label = tf.concat([corner_pair_sample_points_label[i] for i in range(len(corner_pair_sample_points_label))], axis = 0)
+                #corner_pair_256_64_idx = tf.concat([corner_pair_256_64_idx[i] for i in range(len(corner_pair_256_64_idx))], axis = 0) 
+                #corner_pair_valid_mask = tf.concat([corner_pair_valid_mask[i] for i in range(len(corner_pair_valid_mask))], axis = 0) 
+                #corner_pair_available = tf.concat([corner_pair_available[i] for i in range(len(corner_pair_available))], axis = 0) 
+
+                feed_dict = {ops['open_gt_corner_pair_sample_points_pl']: corner_pair_sample_points,
+                    ops['corner_pair_sample_points_label']: corner_pair_sample_points_label,
+                    #??ops['labels_corner_p']: batch_labels_corner_p,
+                    #??ops['labels_direction']: batch_labels_direction,
+                    #??ops['reg_edge_p']: batch_regression_edge,
+                    #ops['reg_corner_p']: batch_regression_corner,
+                    #ops['labels_type']: batch_labels_type,
+                    #ops['simmat_pl']: batch_simmat_pl,
+                    #ops['neg_simmat_pl']: batch_neg_simmat_pl,
+                    #ops['is_training_31']: is_training_31,
+                    ops['is_training_32']: is_training_32}
+
+                summary, step, _, \
+                seg_3_2_loss_val, pred_open_curve_seg = \
+                    sess.run([ops['merged'], ops['step'], ops['train_op'], \
+                        ops[''], ops['pred_open_curve_seg']],feed_dict=feed_dict)                    
+
+
             train_writer.add_summary(summary, step)
             total_loss += loss_val
             total_edge_3_1_loss += edge_3_1_loss_val
@@ -656,6 +739,8 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
             total_corner_3_1_recall += corner_3_1_recall_val
             total_reg_edge_3_1_loss += reg_edge_3_1_loss_val
             total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
+            if STAGE == 2:
+                total_seg_3_2_loss += seg_3_2_loss_val
 #            total_task_2_1_loss += task_2_1_loss_val
 #            total_task_2_1_acc += task_2_1_acc_val
 #            total_task_2_2_loss += task_2_2_loss_val
@@ -674,6 +759,8 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
         total_corner_3_1_recall = total_corner_3_1_recall * 1.0 / num_batch
         total_reg_edge_3_1_loss = total_reg_edge_3_1_loss * 1.0 / num_batch
         total_reg_corner_3_1_loss = total_reg_corner_3_1_loss * 1.0 / num_batch
+        if STAGE == 2:
+            total_seg_3_2_loss = total_seg_3_2_loss * 1.0 / num_batch
 #        total_task_2_1_loss = total_task_2_1_loss * 1.0 / num_batch
 #        total_task_2_1_acc = total_task_2_1_acc * 1.0 / num_batch
 #        total_task_2_2_loss = total_task_2_2_loss * 1.0 / num_batch
@@ -695,6 +782,8 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
         log_string('\t\tTraining Corner_3_1 Mean_Recall: %f' % total_corner_3_1_recall)
         log_string('\t\tTraining Reg_Edge_3_1 Mean_Loss: %f' % total_reg_edge_3_1_loss)
         log_string('\t\tTraining Reg_Corner_3_1 Mean_Loss: %f' % total_reg_corner_3_1_loss)
+        if STAGE == 2:
+            log_string('\t\tTraining total_Seg_3_2 Mean_Loss: %f' % total_seg_3_2_loss)
 #        log_string('\t\tTraining TASK 2_1 Mean_loss: %f' % total_task_2_1_loss)
 #        log_string('\t\tTraining TASK 2_1 Accuracy: %f' % total_task_2_1_acc)
 #        log_string('\t\tTraining TASK 2_2 Mean_loss: %f' % total_task_2_2_loss)
@@ -707,6 +796,7 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
 
 def eval_one_epoch(sess, ops, test_writer):
     """ ops: dict mapping from string to tf ops """
+    train_or_test = "EVAL"
     is_training_31 = False
     is_training_32 = False
     log_string(str(datetime.now()))
@@ -734,6 +824,12 @@ def eval_one_epoch(sess, ops, test_writer):
     #        total_task_5_loss = 0.0
     #        total_task_6_loss = 0.0
     process_start_time = time.time()
+    pred_labels_edge_p_val = np.zeros((num_data, NUM_POINT, 2), np.float32)
+    pred_labels_corner_p_val = np.zeros((num_data, NUM_POINT, 2), np.float32)
+    pred_reg_edge_p_val = np.zeros((num_data, NUM_POINT, 3), np.float32)
+    pred_reg_corner_p_val = np.zeros((num_data, NUM_POINT, 3), np.float32)
+    input_labels_edge_p = np.zeros((num_data,NUM_POINT),np.int32)
+    input_labels_corner_p = np.zeros((num_data,NUM_POINT),np.int32)
     np.random.shuffle(test_data)
     for j in range(num_batch):
         begin_idx = j*BATCH_SIZE
@@ -752,7 +848,9 @@ def eval_one_epoch(sess, ops, test_writer):
             tmp_data = data_cells[cnt]
             batch_inputs[cnt,:,:] = tmp_data[0,0]['down_sample_point']
             batch_labels_edge_p[cnt,:] = np.squeeze(tmp_data[0,0]['edge_points_label'])
+            input_labels_edge_p[begin_idx+cnt, :] = np.squeeze(tmp_data[0,0]['edge_points_label'])
             batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data[0,0]['corner_points_label'])
+            input_labels_corner_p[begin_idx+cnt, :] = np.squeeze(tmp_data[0,0]['corner_points_label'])
             #batch_labels_direction[cnt,:] = np.squeeze(tmp_data['motion_direction_class'][0,0])
             batch_regression_edge[cnt,:,:] = tmp_data[0,0]['edge_points_residual_vector']
             batch_regression_corner[cnt,:,:] = tmp_data[0,0]['corner_points_residual_vector']
@@ -781,14 +879,19 @@ def eval_one_epoch(sess, ops, test_writer):
     #                                 ops['train_op'], ops['task_1_loss'], ops['task_1_recall'],ops['task_1_acc'],ops['task_2_1_loss'], \
     #                                 ops['task_2_1_acc'],ops['task_2_2_loss'],ops['task_3_loss'],ops['task_4_loss'], \
     #                                 ops['task_4_acc'],ops['task_5_loss'],ops['task_6_loss'],ops['loss']],feed_dict=feed_dict)
-        summary, step, _, edge_3_1_loss_val, edge_3_1_recall_val, edge_3_1_acc_val, \
+        summary, step, _, \
+        edge_3_1_loss_val, edge_3_1_recall_val, edge_3_1_acc_val, \
         corner_3_1_loss_val, corner_3_1_recall_val, corner_3_1_acc_val, \
-            reg_edge_3_1_loss_val, reg_corner_3_1_loss_val, loss_val = \
+        reg_edge_3_1_loss_val, reg_corner_3_1_loss_val, loss_val, \
+        pred_labels_edge_p_val[begin_idx:end_idx,:,:], pred_labels_corner_p_val[begin_idx:end_idx,:,:], \
+        pred_reg_edge_p_val[begin_idx:end_idx,:,:], pred_reg_corner_p_val[begin_idx:end_idx,:,:] = \
             sess.run([ops['merged'], ops['step'], ops['train_op'], \
                 ops['edge_3_1_loss'], ops['edge_3_1_recall'], ops['edge_3_1_acc'],\
                 ops['corner_3_1_loss'], ops['corner_3_1_recall'], ops['corner_3_1_acc'],\
-                ops['reg_edge_3_1_loss'], ops['reg_corner_3_1_loss'], ops['loss']],feed_dict=feed_dict)
-                
+                ops['reg_edge_3_1_loss'], ops['reg_corner_3_1_loss'], ops['loss'], \
+                ops['pred_labels_edge_p'], ops['pred_labels_corner_p'], \
+                ops['pred_reg_edge_p'], ops['pred_reg_corner_p']],feed_dict=feed_dict)
+
         test_writer.add_summary(summary, step)
         total_loss += loss_val
         total_edge_3_1_loss += edge_3_1_loss_val
@@ -838,10 +941,6 @@ def eval_one_epoch(sess, ops, test_writer):
     log_string('\t\t%s Corner_3_1 Mean_Recall: %f' % ("EVAL", total_corner_3_1_recall))
     log_string('\t\t%s Reg_Edge_3_1 Mean_Loss: %f' % ("EVAL", total_reg_edge_3_1_loss))
     log_string('\t\t%s Reg_Corner_3_1 Mean_Loss: %f' % ("EVAL", total_reg_corner_3_1_loss))
-    input_labels_edge_p = np.zeros((num_data,NUM_POINT),np.int32)
-    input_labels_corner_p = np.zeros((num_data,NUM_POINT),np.int32)
-    pred_labels_edge_p_val = np.zeros((num_data, NUM_POINT, 2), np.float32)
-    pred_labels_corner_p_val = np.zeros((num_data, NUM_POINT, 2), np.float32)
 
     #        log_string('\t\tTraining TASK 2_1 Mean_loss: %f' % total_task_2_1_loss)
     #        log_string('\t\tTraining TASK 2_1 Accuracy: %f' % total_task_2_1_acc)
@@ -852,10 +951,12 @@ def eval_one_epoch(sess, ops, test_writer):
     #        log_string('\t\tTraining TASK 5 Mean_loss: %f' % total_task_5_loss)
     #        log_string('\t\tTraining TASK 6 Mean_loss: %f' % total_task_6_loss)
     sio.savemat('./test_result/test_pred_'+test_matrices_name[0], {'input_point_cloud': test_data, \
-                                                'input_labels_key_p': input_labels_edge_p, \
-                                                'input_labels_corner_p': input_labels_corner_p, \
-                                                'pred_labels_edge_p_val': pred_labels_edge_p_val, \
-                                                'pred_labels_corner_p_val': pred_labels_corner_p_val})
+                                                'labels_edge_p': input_labels_edge_p, \
+                                                'labels_corner_p': input_labels_corner_p, \
+                                                'pred_labels_edge_p': pred_labels_edge_p_val, \
+                                                'pred_labels_corner_p': pred_labels_corner_p_val, \
+                                                'pred_reg_edge_p': pred_reg_edge_p_val, \
+                                                'pred_reg_corner_p': pred_reg_corner_p_val})
 
 
 
