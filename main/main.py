@@ -660,6 +660,13 @@ def train_one_epoch(sess, ops, train_writer):
                 #batch_labels_direction[cnt,:] = np.squeeze(tmp_data['motion_direction_class'][0,0])
                 batch_regression_edge[cnt,:,:] = tmp_data[0,0]['edge_points_residual_vector']
                 batch_regression_corner[cnt,:,:] = tmp_data[0,0]['corner_points_residual_vector']
+                batch_open_gt_256_64_idx[cnt, ...] = tmp_data[0, 0]['open_gt_256_64_idx']
+                batch_open_gt_mask[cnt, ...] = tmp_data[0, 0]
+                batch_open_gt_type[cnt, ...] = tmp_data[0, 0]
+                batch_open_gt_res[cnt, ...] = tmp_data[0, 0]
+                batch_open_gt_sample_points[cnt, ...] = tmp_data[0, 0]
+                batch_open_gt_valid_mask[cnt, ...] = tmp_data[0, 0]
+                batch_open_gt_pair_idx[cnt, ...] = tmp_data[0, 0]
                 #batch_labels_type[cnt,:] = np.squeeze(tmp_data['motion_dof_type'][0,0])
                 #tmp_simmat = tmp_data['similar_matrix'][0,0]
                 #batch_simmat_pl[cnt,:,:] = tmp_simmat + tmp_simmat.T
