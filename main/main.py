@@ -147,8 +147,17 @@ def get_learning_rate_stage_2(batch,base_learning_rate):
     return learning_rate        
 
 def corner_pair_neighbor_search(points_cloud, pred_corner):
+    """ builds a sphere between two predicted corner points, sample 64 points within the spehere.
 
-    # eventually it has to return the tensor...    
+    Args:
+        points_cloud ([tf.float32], batch_size, 8096, 3): original point cloud
+        pred_corner ([tf.float32], batch_size, 8096, 2): predicted corner points
+
+    Returns:
+        sampled points, its indices and valid masks
+    """    
+    
+
     # open_gt_256_64_idx (DEVICE_BATCH_SIZE, 256, 64, dtype = uint16)
     corner_points = tf.where(pred_corner[..., 1] > 0.999)
     corner_pair_available = [False]*BATCH_SIZE
@@ -230,10 +239,10 @@ def corner_pair_neighbor_search(points_cloud, pred_corner):
         # later use tf.gather(points_cloud[0], indices=batch_256_64[0], axis=0) to access the point cloud.
 
     # (32, 256, 64, 3), (32, 256, 64), (32, 256, 1)
-    # note that these are in a list. this should be first concatenated.
-    corner_pair_sample_points = tf.concat([corner_pair_sample_points[i] for i in range(len(corner_pair_sample_points))], axis = 0)
-    corner_pair_256_64_idx = tf.concat([corner_pair_256_64_idx[i] for i in range(len(corner_pair_256_64_idx))], axis = 0)
-    corner_pair_valid_mask = tf.concat([corner_pair_valid_mask[i] for i in range(len(corner_pair_valid_mask))], axis = 0)
+    # note that these are in a list. this should be later concatenated.
+    # corner_pair_sample_points = tf.concat([corner_pair_sample_points[i] for i in range(len(corner_pair_sample_points))], axis = 0)
+    # corner_pair_256_64_idx = tf.concat([corner_pair_256_64_idx[i] for i in range(len(corner_pair_256_64_idx))], axis = 0)
+    # corner_pair_valid_mask = tf.concat([corner_pair_valid_mask[i] for i in range(len(corner_pair_valid_mask))], axis = 0)
 
     return corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available
 
@@ -336,13 +345,13 @@ def train():
                                 batch_open_gt_corner_pair_sample_points_label = tf.slice(open_gt_corner_pair_sample_points_label, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
 
                                 # maybe we don't need these:
-                                batch_open_gt_256_64_idx = tf.slice(open_gt_256_64_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-                                batch_open_gt_res = tf.slice(open_gt_res, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-                                batch_open_gt_sample_points = tf.slice(open_gt_sample_points, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-                                batch_open_gt_mask = tf.slice(open_gt_mask, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-                                batch_open_gt_valid_mask = tf.slice(open_gt_valid_mask, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-                                batch_open_gt_pair_idx = tf.slice(open_gt_pair_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-                                batch_open_gt_type = tf.slice(open_gt_type, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                #batch_open_gt_256_64_idx = tf.slice(open_gt_256_64_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                #batch_open_gt_res = tf.slice(open_gt_res, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                #batch_open_gt_sample_points = tf.slice(open_gt_sample_points, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                #batch_open_gt_mask = tf.slice(open_gt_mask, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                #batch_open_gt_valid_mask = tf.slice(open_gt_valid_mask, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                #batch_open_gt_pair_idx = tf.slice(open_gt_pair_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                #batch_open_gt_type = tf.slice(open_gt_type, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
                                 #
                                 
                                 pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(batch_open_gt_corner_pair_sample_points_pl, is_training_32, bn_decay=bn_decay)
@@ -631,6 +640,7 @@ def train_one_epoch(sess, ops, train_writer):
 
         np.random.shuffle(train_data)
         for j in range(num_batch):
+            # remember that num_batch will be 8
             begin_idx = j*BATCH_SIZE
             end_idx = (j+1)*BATCH_SIZE
             data_cells = train_data[begin_idx: end_idx,0]
@@ -653,6 +663,7 @@ def train_one_epoch(sess, ops, train_writer):
             #batch_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
             #batch_neg_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
             for cnt in range(BATCH_SIZE):
+                # cnt: 0 ... 31
                 tmp_data = data_cells[cnt]
                 batch_inputs[cnt,:,:] = tmp_data[0,0]['down_sample_point']
                 batch_labels_edge_p[cnt,:] = np.squeeze(tmp_data[0,0]['edge_points_label'])
@@ -661,7 +672,9 @@ def train_one_epoch(sess, ops, train_writer):
                 batch_regression_edge[cnt,:,:] = tmp_data[0,0]['edge_points_residual_vector']
                 batch_regression_corner[cnt,:,:] = tmp_data[0,0]['corner_points_residual_vector']
                 batch_open_gt_256_64_idx[cnt, ...] = tmp_data[0, 0]['open_gt_256_64_idx']
-                batch_open_gt_mask[cnt, ...] = tmp_data[0, 0]
+
+
+                batch_open_gt_mask[cnt, ...] = tmp_data[0, 0][]
                 batch_open_gt_type[cnt, ...] = tmp_data[0, 0]
                 batch_open_gt_res[cnt, ...] = tmp_data[0, 0]
                 batch_open_gt_sample_points[cnt, ...] = tmp_data[0, 0]
@@ -706,6 +719,7 @@ def train_one_epoch(sess, ops, train_writer):
                     ops['reg_edge_3_1_loss'], ops['reg_corner_3_1_loss'], ops['loss'], \
                     ops['pred_labels_edge_p'], ops['pred_labels_corner_p'], \
                     ops['pred_reg_edge_p'], ops['pred_reg_corner_p']],feed_dict=feed_dict)
+
             if STAGE == 2:
                 # end_idx - begin_idx = 32
                 corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_valid_mask, corner_pair_available = corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val[begin_idx:end_idx,:,:])
