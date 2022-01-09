@@ -172,7 +172,7 @@ def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
     # FC layers
     net = tf_util.conv1d(l0_points, 128, 1, padding='VALID', bn=True, is_training=is_training, scope='pointnet/fc1', bn_decay=bn_decay)
 
-    end_points['feats'] = net 
+    end_points['feats'] = net
     if STAGE == 1:
     	net = tf_util.dropout(net, keep_prob=0.5, is_training=is_training, scope='pointnet/dp1')
     
@@ -236,22 +236,22 @@ def get_stage_2_loss(pred_open_curve_seg, \
                      #batch_open_gt_pair_idx, \
                      #batch_open_gt_type,\
                      ):
-    # Section 3.2 Open Curve Proposal Loss 
-    num_curves = tf.reduce_sum(tf.where(batch_open_gt_valid_mask == 1))
+    # Section 3.2 Open Curve Proposal Loss
+    #num_curves = tf.reduce_sum(tf.where(batch_open_gt_valid_mask == 1))
 
     ## Concat all the GT
-    batch_open_gt_256_64_idx = tf.concat([batch_open_gt_256_64_idx], axis = 0)
-    batch_open_gt_sample_points = tf.concat([batch_open_gt_sample_points], axis = 0)
-    batch_open_gt_valid_mask = tf.concat([batch_open_gt_valid_mask], axis = 0)
-    batch_open_gt_mask = tf.concat([batch_open_gt_mask], axis = 0)
-    batch_open_gt_pair_idx = tf.concat([batch_open_gt_pair_idx], axis = 0)
+    #batch_open_gt_256_64_idx = tf.concat([batch_open_gt_256_64_idx], axis = 0)
+    #batch_open_gt_sample_points = tf.concat([batch_open_gt_sample_points], axis = 0)
+    #batch_open_gt_valid_mask = tf.concat([batch_open_gt_valid_mask], axis = 0)
+    #batch_open_gt_mask = tf.concat([batch_open_gt_mask], axis = 0)
+    #batch_open_gt_pair_idx = tf.concat([batch_open_gt_pair_idx], axis = 0)
 
     # change int to float
-    batch_open_gt_valid_mask = tf.cast(batch_open_gt_valid_mask, tf.float32) # (256, 1)
-    batch_open_gt_mask = tf.cast(batch_open_gt_mask, tf.float32) # (256, 64, 0/1)
+    #batch_open_gt_valid_mask = tf.cast(batch_open_gt_valid_mask, tf.float32) # (256, 1)
+    #batch_open_gt_mask = tf.cast(batch_open_gt_mask, tf.float32) # (256, 64, 0/1)
 
-    neg_batch_open_gt_valid_mask = tf.ones_like(batch_open_gt_valid_mask)-batch_open_gt_valid_mask
-    neg_batch_open_gt_mask = tf.ones_like(batch_open_gt_mask)-batch_open_gt_mask
+    #neg_batch_open_gt_valid_mask = tf.ones_like(batch_open_gt_valid_mask)-batch_open_gt_valid_mask
+    #neg_batch_open_gt_mask = tf.ones_like(batch_open_gt_mask)-batch_open_gt_mask
 
 
 
