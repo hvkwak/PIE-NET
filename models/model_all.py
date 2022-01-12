@@ -18,16 +18,19 @@ def smooth_l1_dist(deltas, sigma2=2.0, name='smooth_l1_dist'):
 
 def placeholder_inputs_32(batch_size):
     # placeholders for Section 3.2., batch_size(default) = 32
-    open_gt_corner_pair_sample_points_pl = tf.compat.v1.placeholder(tf.float32, shape = (batch_size*256,64,3))
-    open_gt_256_64_idx_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
-    open_gt_mask_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
-    open_gt_type_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,1))
-    open_gt_res_pl = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,6))
-    open_gt_sample_points_pl = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,64,3))
-    open_gt_valid_mask_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,1))
-    open_gt_pair_idx_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,2))
-    return open_gt_corner_pair_sample_points_pl, open_gt_256_64_idx_pl, open_gt_mask_pl, \
-        open_gt_type_pl, open_gt_res_pl, open_gt_sample_points_pl, open_gt_valid_mask_pl, open_gt_pair_idx_pl
+    open_gt_corner_pair_sample_points_pl = tf.compat.v1.placeholder(tf.float32, shape = (batch_size*256, 64, 3))
+    open_gt_corner_valid_mask_256_64 = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256, 64))
+    open_gt_labels_256_64 = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256, 64))
+    open_gt_labels_pair = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256, 64, 1))
+
+    #open_gt_256_64_idx_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
+    #open_gt_mask_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
+    #open_gt_type_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,1))
+    #open_gt_res_pl = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,6))
+    #open_gt_sample_points_pl = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,64,3))
+    #open_gt_valid_mask_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,1))
+    #open_gt_pair_idx_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,2))
+    return open_gt_corner_pair_sample_points_pl, open_gt_corner_valid_mask_256_64, open_gt_labels_256_64, open_gt_labels_pair
 
 def placeholder_inputs_31(batch_size,num_point):
     pointclouds_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))  # input
@@ -223,9 +226,9 @@ def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
 
 
 def get_stage_2_loss(pred_open_curve_seg, \
-                     corner_pair_256_64_idx, \
-                     #corner_pair_valid_mask, \
-                     #pred_open_curve_cls, \
+                     open_gt_labels_256_64, \
+                     open_gt_valid_mask_256_64, \
+                     open_gt_labels_pair, \
                      #pred_open_curve_reg, \
                      #end_points, \
                      #batch_open_gt_res, \
@@ -236,6 +239,20 @@ def get_stage_2_loss(pred_open_curve_seg, \
                      #batch_open_gt_pair_idx, \
                      #batch_open_gt_type,\
                      ):
+
+    # Loss computation
+    # 1. Compute CrossEntropy predicted labels <-> gt_labels_256_64
+    # 2. corner_valid_mask_256_64 will take elements that were valid only
+    # 3. gt_labels_pair will finally will let us take valid proposals only
+    # 4. (optional) corner_valid_mask_256_64 will balance loss the per curve.
+
+    # Change this accordingly. make sure that loss balancing takes place.
+    tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_open_curve_seg, labels = open_gt_labels_256_64)*open_gt_valid_mask_256_64*open_gt_labels_pair
+
+
+
+
+
     # Section 3.2 Open Curve Proposal Loss
     #num_curves = tf.reduce_sum(tf.where(batch_open_gt_valid_mask == 1))
 
