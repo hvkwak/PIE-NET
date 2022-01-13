@@ -427,14 +427,13 @@ def train():
                                 # Note:
                                 # add the end_points term in loss!
                                 #
-                                pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(batch_corner_pair_sample_points_pl, is_training_32, bn_decay=bn_decay)
+                                pred_open_curve_seg, _, _, end_points = MODEL.get_model_32(batch_corner_pair_sample_points_pl, is_training_32, bn_decay=bn_decay)
                                 
                                 seg_3_2_loss, seg_3_2_acc = MODEL.get_stage_2_loss(pred_open_curve_seg, \
                                                                                 batch_open_gt_256_64_labels, \
                                                                                 batch_open_gt_256_64_valid_mask, \
                                                                                 batch_open_gt_pair_valid_mask, \
                                                                                 #pred_open_curve_reg, \
-                                                                                #end_points, \
                                                                                 #batch_open_gt_res, \
                                                                                 #batch_open_gt_sample_points, \
                                                                                 #batch_open_gt_256_64_idx, \
@@ -442,7 +441,8 @@ def train():
                                                                                 #batch_open_gt_valid_mask, \
                                                                                 #batch_open_gt_pair_idx, \
                                                                                 #batch_open_gt_type,\
-                                                                                )
+                                                                                end_points, \
+                                                                                0.0001)
                             if STAGE == 1:
                                 tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_loss' % (i), edge_3_1_loss)
                                 tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_recall' % (i), edge_3_1_recall)
