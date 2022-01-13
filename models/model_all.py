@@ -177,7 +177,7 @@ def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
 
     end_points['feats'] = net
     if STAGE == 1:
-    	net = tf_util.dropout(net, keep_prob=0.5, is_training=is_training, scope='pointnet/dp1')
+        net = tf_util.dropout(net, keep_prob=0.5, is_training=is_training, scope='pointnet/dp1')
     
     # dof_feature
     dof_feat = tf_util.conv1d(net, 128, 1, padding='VALID', bn=True, is_training=is_training, scope='pointnet/fc_dof', bn_decay=bn_decay)

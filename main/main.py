@@ -467,7 +467,6 @@ def train():
                             
                             elif STAGE == 2:
                                 tf.compat.v1.summary.scalar('%d_GPU_seg_3_2_loss' % (i), seg_3_2_loss)
-                                tf.compat.v1.summary.scalar('%d_GPU_seg_3_2_recall' % (i), seg_3_2_recall)
                                 tf.compat.v1.summary.scalar('%d_GPU_seg_3_2_acc' % (i), seg_3_2_acc)
                                 tf.compat.v1.summary.scalar('%d_GPU_loss'% (i), seg_3_2_loss)
                                 grads = optimizer.compute_gradients(seg_3_2_loss) # here's where the loss and gradients are covered.
@@ -613,7 +612,6 @@ def train():
                'reg_edge_3_1_loss': reg_edge_3_1_loss,
                'reg_corner_3_1_loss': reg_corner_3_1_loss,
                'seg_3_2_loss': seg_3_2_loss,
-               'seg_3_2_recall': seg_3_2_recall,
                'seg_3_2_acc': seg_3_2_acc,
                #'task_2_2_loss': task_2_2_loss,
                #'task_3_loss': task_3_loss,
