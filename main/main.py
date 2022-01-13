@@ -410,9 +410,9 @@ def train():
                             elif STAGE == 2: # Section 3.2.
                                 # GT
                                 batch_corner_pair_sample_points_pl = tf.slice(open_gt_corner_pair_sample_points_pl, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-                                batch_corner_pair_sample_points_label = tf.slice(open_gt_labels_256_64, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-                                batch_open_gt_corner_valid_mask_256_64 = tf.slice(open_gt_corner_valid_mask_256_64, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
-                                batch_open_gt_labels_pair = tf.slice(open_gt_labels_pair, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                batch_open_gt_256_64_labels = tf.slice(open_gt_labels_256_64, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                batch_open_gt_256_64_valid_mask = tf.slice(open_gt_corner_valid_mask_256_64, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
+                                batch_open_gt_pair_valid_mask = tf.slice(open_gt_labels_pair, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
 
                                 # maybe we don't need these:
                                 #batch_open_gt_256_64_idx = tf.slice(open_gt_256_64_idx, [i*DEVICE_BATCH_SIZE,0,0], [DEVICE_BATCH_SIZE,-1,-1])
@@ -429,20 +429,20 @@ def train():
                                 #
                                 pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = MODEL.get_model_32(batch_corner_pair_sample_points_pl, is_training_32, bn_decay=bn_decay)
                                 
-                                seg_3_2_loss, seg_3_2_recall, seg_3_2_acc = MODEL.get_stage_2_loss(pred_open_curve_seg, \
-                                                                                                    batch_corner_pair_sample_points_label, \
-                                                                                                    batch_open_gt_corner_valid_mask_256_64, \
-                                                                                                    batch_open_gt_labels_pair, \
-                                                                                                    #pred_open_curve_reg, \
-                                                                                                    #end_points, \
-                                                                                                    #batch_open_gt_res, \
-                                                                                                    #batch_open_gt_sample_points, \
-                                                                                                    #batch_open_gt_256_64_idx, \
-                                                                                                    #batch_open_gt_mask, \
-                                                                                                    #batch_open_gt_valid_mask, \
-                                                                                                    #batch_open_gt_pair_idx, \
-                                                                                                    #batch_open_gt_type,\
-                                                                                                    )
+                                seg_3_2_loss, seg_3_2_acc = MODEL.get_stage_2_loss(pred_open_curve_seg, \
+                                                                                batch_open_gt_256_64_labels, \
+                                                                                batch_open_gt_256_64_valid_mask, \
+                                                                                batch_open_gt_pair_valid_mask, \
+                                                                                #pred_open_curve_reg, \
+                                                                                #end_points, \
+                                                                                #batch_open_gt_res, \
+                                                                                #batch_open_gt_sample_points, \
+                                                                                #batch_open_gt_256_64_idx, \
+                                                                                #batch_open_gt_mask, \
+                                                                                #batch_open_gt_valid_mask, \
+                                                                                #batch_open_gt_pair_idx, \
+                                                                                #batch_open_gt_type,\
+                                                                                )
                             if STAGE == 1:
                                 tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_loss' % (i), edge_3_1_loss)
                                 tf.compat.v1.summary.scalar('%d_GPU_edge_3_1_recall' % (i), edge_3_1_recall)

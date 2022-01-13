@@ -226,9 +226,9 @@ def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
 
 
 def get_stage_2_loss(pred_open_curve_seg, \
-                     open_gt_labels_256_64, \
-                     open_gt_valid_mask_256_64, \
-                     open_gt_labels_pair, \
+                     gt_256_64_labels, \
+                     gt_256_64_valid_mask, \
+                     gt_pair_valid_mask, \
                      #pred_open_curve_reg, \
                      #end_points, \
                      #batch_open_gt_res, \
@@ -242,12 +242,26 @@ def get_stage_2_loss(pred_open_curve_seg, \
 
     # Loss computation
     # 1. Compute CrossEntropy predicted labels <-> gt_labels_256_64
-    # 2. corner_valid_mask_256_64 will take elements that were valid only
-    # 3. gt_labels_pair will finally will let us take valid proposals only
+    # 2. gt_256_64_valid_mask will take elements that were valid only
+    # 3. gt_pair_valid_mask will finally will let us take valid proposals only
     # 4. (optional) corner_valid_mask_256_64 will balance loss the per curve.
+    num_corner_pairs = gt_256_64_labels.get_shape()[0]
 
     # Change this accordingly. make sure that loss balancing takes place.
-    tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_open_curve_seg, labels = open_gt_labels_256_64)*open_gt_valid_mask_256_64*open_gt_labels_pair
+    mask = tf.cast(gt_256_64_valid_mask, tf.float32)
+    neg_mask = tf.ones_like(mask) - mask
+    Np = tf.expand_dims(tf.reduce_sum(mask,axis=1),1)
+    Nn = tf.expand_dims(tf.reduce_sum(neg_mask, axis=1),1)
+
+    # we don't compute seg_3_2_recall here, as we uniform randomly sample the candidate points in the sphere.
+    seg_3_2_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_open_curve_seg, labels = gt_256_64_labels)*(mask*(Nn/Np)+1))
+    seg_3_2_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_open_curve_seg, axis = 2, output_type=tf.int32), gt_256_64_labels), tf.float32)*mask, axis = 1) / tf.reduce_sum(mask, axis = 1))
+    
+
+    
+
+
+    gt_256_64_valid_mask*gt_pair_valid_mask
 
 
 
@@ -284,15 +298,9 @@ def get_stage_2_loss(pred_open_curve_seg, \
     edge_3_1_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_labels_edge_p,axis=2,output_type = tf.int32),\
                         labels_edge_p),tf.float32),axis = 1)/num_point)
     '''
-    # pred_open_curve_seg: (N*64*2)
-    labels_open_curve_seg = tf.zeros((pred_open_curve_seg.shape[0:2]), dtype = tf.int32)
-    
 
 
-    seg_3_2_loss = tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_open_curve_seg, labels = labels_open_curve_seg)*corner_pair_valid_mask)/tf.reduce_sum(corner_pair_valid_mask)
-
-    loss = seg_3_2_loss
-    return seg_3_2_loss, loss
+    return seg_3_2_loss, seg_3_2_acc
 
 def get_stage_1_loss(pred_labels_edge_p, \
                      pred_labels_corner_p, \
