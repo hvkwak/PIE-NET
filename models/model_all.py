@@ -21,7 +21,7 @@ def placeholder_inputs_32(batch_size):
     open_gt_corner_pair_sample_points_pl = tf.compat.v1.placeholder(tf.float32, shape = (batch_size*256, 64, 3))
     open_gt_corner_valid_mask_256_64 = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256, 64))
     open_gt_labels_256_64 = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256, 64))
-    open_gt_labels_pair = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256, 64, 1))
+    open_gt_labels_pair = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256, 1))
 
     #open_gt_256_64_idx_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
     #open_gt_mask_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
@@ -55,7 +55,7 @@ def get_model_32(point_cloud, is_training, bn_decay=None):
     num_point = point_cloud.get_shape()[1]
     end_points = {}
     # T-Net
-    with tf.compat.v1.variable_scope('transform_net1') as sc:
+    with tf.compat.v1.variable_scope('stage2/transform_net1') as sc:
         transform = input_transform_net(point_cloud, is_training, bn_decay, K=3)
     point_cloud_transformed = tf.matmul(point_cloud, transform)
     input_image = tf.expand_dims(point_cloud_transformed, -1)
@@ -63,83 +63,88 @@ def get_model_32(point_cloud, is_training, bn_decay=None):
     net = tf_util.conv2d(input_image, 64, [1,3],
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
-                         scope='conv1', bn_decay=bn_decay)
+                         scope='stage2/conv1', bn_decay=bn_decay)
     net = tf_util.conv2d(net, 64, [1,1],
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
-                         scope='conv2', bn_decay=bn_decay)
+                         scope='stage2/conv2', bn_decay=bn_decay)
     # T-Net
-    with tf.compat.v1.variable_scope('transform_net2') as sc:
+    with tf.compat.v1.variable_scope('stage2/transform_net2') as sc:
         transform = feature_transform_net(net, is_training, bn_decay, K=64)
     end_points['transform'] = transform
     net_transformed = tf.matmul(tf.squeeze(net, axis=[2]), transform)
-    point_feat = tf.expand_dims(net_transformed, [2])    
+    point_feat = tf.expand_dims(net_transformed, [2])
     # Shared MLPs again.
     net = tf_util.conv2d(point_feat, 64, [1,1],
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
-                         scope='conv3', bn_decay=bn_decay)
+                         scope='stage2/conv3', bn_decay=bn_decay)
     net = tf_util.conv2d(net, 128, [1,1],
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
-                         scope='conv4', bn_decay=bn_decay)
+                         scope='stage2/conv4', bn_decay=bn_decay)
     net = tf_util.conv2d(net, 1024, [1,1],
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
-                         scope='conv5', bn_decay=bn_decay)
+                         scope='stage2/conv5', bn_decay=bn_decay)
     global_feat = tf_util.max_pool2d(net, [num_point,1],
                                      padding='VALID', scope='maxpool')
 
+    '''
+    # this goes to classification.
     global_feat_reshape = tf.reshape(global_feat, [batch_size, -1])
 
     # head 2: Classification, this determines wheter we need to generate a line, circle or BSpline.
     class_head = tf_util.fully_connected(global_feat_reshape, 512, bn=True, is_training=is_training,
-                                  scope='fc1', bn_decay=bn_decay)
+                                  scope='stage2/cls/fc1', bn_decay=bn_decay)
     class_head = tf_util.dropout(class_head, keep_prob=0.7, is_training=is_training,
-                          scope='dp1')
+                          scope='stage2/cls/dp1')
     class_head = tf_util.fully_connected(class_head, 256, bn=True, is_training=is_training,
-                                  scope='fc2', bn_decay=bn_decay)
+                                  scope='stage2/cls/fc2', bn_decay=bn_decay)
     class_head = tf_util.dropout(class_head, keep_prob=0.7, is_training=is_training,
-                          scope='dp2')
-    pred_open_curve_cls = tf_util.fully_connected(class_head, 2, activation_fn=None, scope='fc3')     # 0/1
+                          scope='stage2/cls/dp2')
+    pred_open_curve_cls = tf_util.fully_connected(class_head, 2, activation_fn=None, scope='stage2/cls/fc3')     # 0/1
+    '''
 
     # head 1: Segmentation, this determines wheter a particular point belongs to the candidate curve.
     global_feat_expand = tf.tile(global_feat, [1, num_point, 1, 1])
-    concat_feat = tf.concat(3, [point_feat, global_feat_expand])
+    concat_feat = tf.concat([point_feat, global_feat_expand], 3)
     net = tf_util.conv2d(concat_feat, 512, [1,1],
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
-                         scope='conv6', bn_decay=bn_decay)
+                         scope='stage2/seg/conv6', bn_decay=bn_decay)
     net = tf_util.conv2d(net, 256, [1,1],
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
-                         scope='conv7', bn_decay=bn_decay)
+                         scope='stage2/seg/conv7', bn_decay=bn_decay)
     net = tf_util.conv2d(net, 128, [1,1],
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
-                         scope='conv8', bn_decay=bn_decay)
+                         scope='stage2/seg/conv8', bn_decay=bn_decay)
     net = tf_util.conv2d(net, 128, [1,1],
                          padding='VALID', stride=[1,1],
                          bn=True, is_training=is_training,
-                         scope='conv9', bn_decay=bn_decay)
+                         scope='stage2/seg/conv9', bn_decay=bn_decay)
     
     seg_head = tf_util.conv2d(net, 2, [1,1],
                          padding='VALID', stride=[1,1], activation_fn=None,
-                         scope='conv10')
+                         scope='stage2/seg/conv10')
     pred_open_curve_seg = tf.squeeze(seg_head, [2]) # BxNxC (e.g. 8x64x2)
 
+    '''
     # head 3: Regression, this identifies the parameters of the proposed curve.    
     regression_head = tf_util.fully_connected(global_feat_reshape, 512, bn=True, is_training=is_training,
-                                  scope='fc1', bn_decay=bn_decay)
+                                  scope='stage2/reg/fc1', bn_decay=bn_decay)
     regression_head = tf_util.dropout(regression_head, keep_prob=0.7, is_training=is_training,
-                          scope='dp1')
+                          scope='stage2/reg/dp1')
     regression_head = tf_util.fully_connected(regression_head, 256, bn=True, is_training=is_training,
-                                  scope='fc2', bn_decay=bn_decay)
+                                  scope='stage2/reg/fc2', bn_decay=bn_decay)
     regression_head = tf_util.dropout(regression_head, keep_prob=0.7, is_training=is_training,
-                          scope='dp2')
-    pred_open_curve_reg = tf_util.fully_connected(regression_head, 9, activation_fn=None, scope='fc3') # 3 coordinates
+                          scope='stage2/reg/dp2')
+    pred_open_curve_reg = tf_util.fully_connected(regression_head, 9, activation_fn=None, scope='stage2/reg/fc3') # 3 coordinates
+    '''
     
-    return pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points
+    return pred_open_curve_seg, end_points
 
 def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
     """ Part segmentation PointNet, input is BxNx6 (XYZ NormalX NormalY NormalZ), output Bx50 """
@@ -160,26 +165,28 @@ def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
 #    l0_points = pointnet_fp_module(l0_xyz, l1_xyz, tf.concat([l0_xyz,l0_points],axis=-1), l1_points, [128,128,128], is_training, bn_decay, scope='pointnet/fa_layer3')
 
     # Layer 1
-    l1_xyz, l1_points, l1_indices = pointnet_sa_module(l0_xyz, l0_points, npoint=4096, radius=0.05, nsample=32, mlp=[32,32,64], mlp2=None, group_all=False, is_training=is_training, bn_decay=bn_decay, scope='layer1')
-    l2_xyz, l2_points, l2_indices = pointnet_sa_module(l1_xyz, l1_points, npoint=2048, radius=0.1, nsample=32, mlp=[64,64,128], mlp2=None, group_all=False, is_training=is_training, bn_decay=bn_decay, scope='layer2')
-    l3_xyz, l3_points, l3_indices = pointnet_sa_module(l2_xyz, l2_points, npoint=1024, radius=0.2, nsample=32, mlp=[128,128,256], mlp2=None, group_all=False, is_training=is_training, bn_decay=bn_decay, scope='layer3')
-    l4_xyz, l4_points, l4_indices = pointnet_sa_module(l3_xyz, l3_points, npoint=512, radius=0.4, nsample=32, mlp=[256,256,512], mlp2=None, group_all=False, is_training=is_training, bn_decay=bn_decay, scope='layer4')
+    l1_xyz, l1_points, l1_indices = pointnet_sa_module(l0_xyz, l0_points, npoint=4096, radius=0.05, nsample=32, mlp=[32,32,64], mlp2=None, group_all=False, is_training=is_training, bn_decay=bn_decay, scope='stage1/layer1')
+    l2_xyz, l2_points, l2_indices = pointnet_sa_module(l1_xyz, l1_points, npoint=2048, radius=0.1, nsample=32, mlp=[64,64,128], mlp2=None, group_all=False, is_training=is_training, bn_decay=bn_decay, scope='stage1/layer2')
+    l3_xyz, l3_points, l3_indices = pointnet_sa_module(l2_xyz, l2_points, npoint=1024, radius=0.2, nsample=32, mlp=[128,128,256], mlp2=None, group_all=False, is_training=is_training, bn_decay=bn_decay, scope='stage1/layer3')
+    l4_xyz, l4_points, l4_indices = pointnet_sa_module(l3_xyz, l3_points, npoint=512, radius=0.4, nsample=32, mlp=[256,256,512], mlp2=None, group_all=False, is_training=is_training, bn_decay=bn_decay, scope='stage1/layer4')
 
     # Feature Propagation layers
-    l3_points = pointnet_fp_module(l3_xyz, l4_xyz, l3_points, l4_points, [256,256], is_training, bn_decay, scope='fa_layer1')
-    l2_points = pointnet_fp_module(l2_xyz, l3_xyz, l2_points, l3_points, [256,256], is_training, bn_decay, scope='fa_layer2')
-    l1_points = pointnet_fp_module(l1_xyz, l2_xyz, l1_points, l2_points, [256,128], is_training, bn_decay, scope='fa_layer3')
-    l0_points = pointnet_fp_module(l0_xyz, l1_xyz, l0_points, l1_points, [128,128,128], is_training, bn_decay, scope='fa_layer4')
+    l3_points = pointnet_fp_module(l3_xyz, l4_xyz, l3_points, l4_points, [256,256], is_training, bn_decay, scope='stage1/fa_layer1')
+    l2_points = pointnet_fp_module(l2_xyz, l3_xyz, l2_points, l3_points, [256,256], is_training, bn_decay, scope='stage1/fa_layer2')
+    l1_points = pointnet_fp_module(l1_xyz, l2_xyz, l1_points, l2_points, [256,128], is_training, bn_decay, scope='stage1/fa_layer3')
+    l0_points = pointnet_fp_module(l0_xyz, l1_xyz, l0_points, l1_points, [128,128,128], is_training, bn_decay, scope='stage1/fa_layer4')
 
     # FC layers
-    net = tf_util.conv1d(l0_points, 128, 1, padding='VALID', bn=True, is_training=is_training, scope='pointnet/fc1', bn_decay=bn_decay)
+    net = tf_util.conv1d(l0_points, 128, 1, padding='VALID', bn=True, is_training=is_training, scope='stage1/pointnet/fc1', bn_decay=bn_decay)
 
     end_points['feats'] = net
     if STAGE == 1:
-        net = tf_util.dropout(net, keep_prob=0.5, is_training=is_training, scope='pointnet/dp1')
+        net = tf_util.dropout(net, keep_prob=0.5, is_training=is_training, scope='stage1/pointnet/dp1')
+    #if is_training:
+    #    net = tf_util.dropout(net, keep_prob=0.5, is_training=is_training, scope='pointnet/dp1')        
     
     # dof_feature
-    dof_feat = tf_util.conv1d(net, 128, 1, padding='VALID', bn=True, is_training=is_training, scope='pointnet/fc_dof', bn_decay=bn_decay)
+    dof_feat = tf_util.conv1d(net, 128, 1, padding='VALID', bn=True, is_training=is_training, scope='stage1/pointnet/fc_dof', bn_decay=bn_decay)
     # simmat_feature
     #simmat_feat = tf_util.conv1d(net, 128, 1, padding='VALID', bn=True, is_training=is_training, scope='pointnet/fc_simmat', bn_decay=bn_decay)
 
@@ -256,22 +263,31 @@ def get_stage_2_loss(pred_open_curve_seg, \
     num_corner_pairs = gt_256_64_labels.get_shape()[0]
 
     # Change this accordingly. make sure that loss balancing takes place.
-    mask = tf.cast(gt_256_64_valid_mask, tf.float32)
-    neg_mask = tf.ones_like(mask) - mask
-    Np = tf.expand_dims(tf.reduce_sum(mask,axis=1),1)
-    Nn = tf.expand_dims(tf.reduce_sum(neg_mask, axis=1),1)
+    mask_256_64 = tf.cast(gt_256_64_valid_mask, tf.float32)
+    neg_mask_256_64 = tf.ones_like(mask_256_64) - mask_256_64
+    Np_256_64 = tf.expand_dims(tf.reduce_sum(mask_256_64, axis=1),1)
+    Nn_256_64 = tf.expand_dims(tf.reduce_sum(neg_mask_256_64, axis=1),1)
 
-    # we don't compute seg_3_2_recall here, as we uniform randomly sample the candidate points in the sphere.
-    seg_3_2_loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_open_curve_seg, labels = gt_256_64_labels)*(mask*(Nn/Np)+1))
-    seg_3_2_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_open_curve_seg, axis = 2, output_type=tf.int32), gt_256_64_labels), tf.float32)*mask, axis = 1) / tf.reduce_sum(mask, axis = 1))
+    mask_pair = tf.cast(gt_pair_valid_mask, tf.float32)
+    neg_mask_pair = tf.ones_like(mask_pair) - mask_pair
+    Np_pair = tf.reduce_sum(mask_pair)
+    Nn_pair = tf.reduce_sum(neg_mask_pair)
+
+    seg_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_open_curve_seg, labels = gt_256_64_labels)
+    seg_entropy_loss_valid_256_64 = seg_entropy_loss*(mask_256_64*(Nn_256_64/Np_256_64)+1)
+    seg_3_2_loss = tf.reduce_mean(seg_entropy_loss_valid_256_64*(mask_pair*(Nn_pair/Np_pair)+1))
     
-
+    #tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_open_curve_seg, axis = 2, output_type=tf.int32), gt_256_64_labels), tf.float32)*mask_256_64, axis = 1)
+    #seg_3_2_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_open_curve_seg, axis = 2, output_type=tf.int32), gt_256_64_labels), tf.float32)*mask, axis = 1) / tf.reduce_sum(mask, axis = 1))
+    #seg_3_2_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_open_curve_seg, axis = 2, output_type=tf.int32), gt_256_64_labels), tf.float32)*mask, axis = 1) / tf.reduce_sum(mask, axis = 1))
+    
+    loss = seg_3_2_loss + mat_diff_loss*reg_weight
     
 
 
 
     # Section 3.2 Open Curve Proposal Loss
-    #num_curves = tf.reduce_sum(tf.where(batch_open_gt_valid_mask == 1))
+    # num_curves = tf.reduce_sum(tf.where(batch_open_gt_valid_mask == 1))
 
     ## Concat all the GT
     #batch_open_gt_256_64_idx = tf.concat([batch_open_gt_256_64_idx], axis = 0)
@@ -302,8 +318,8 @@ def get_stage_2_loss(pred_open_curve_seg, \
                         labels_edge_p),tf.float32),axis = 1)/num_point)
     '''
 
-
-    return seg_3_2_loss, seg_3_2_acc, mat_diff_loss*reg_weight
+    return loss
+    #return seg_3_2_loss, seg_3_2_acc, loss + mat_diff_loss*reg_weight
 
 def get_stage_1_loss(pred_labels_edge_p, \
                      pred_labels_corner_p, \

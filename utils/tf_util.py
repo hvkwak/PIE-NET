@@ -222,7 +222,7 @@ def conv2d_transpose(inputs,
 
   Note: conv2d(conv2d_transpose(a, num_out, ksize, stride), a.shape[-1], ksize, stride) == a
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
       kernel_h, kernel_w = kernel_size
       num_in_channels = inputs.get_shape()[-1]
       kernel_shape = [kernel_h, kernel_w,
@@ -300,7 +300,7 @@ def conv3d(inputs,
   Returns:
     Variable tensor
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
     kernel_d, kernel_h, kernel_w = kernel_size
     num_in_channels = inputs.get_shape()[-1]
     kernel_shape = [kernel_d, kernel_h, kernel_w,
@@ -345,7 +345,7 @@ def fully_connected(inputs,
   Returns:
     Variable tensor of size B x num_outputs.
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
     num_input_units = inputs.get_shape()[-1]
     weights = _variable_with_weight_decay('weights',
                                           shape=[num_input_units, num_outputs],
@@ -380,7 +380,7 @@ def max_pool2d(inputs,
   Returns:
     Variable tensor
   """
-  with tf.variable_scope(scope) as sc:
+  with tf.compat.v1.variable_scope(scope) as sc:
     kernel_h, kernel_w = kernel_size
     stride_h, stride_w = stride
     outputs = tf.nn.max_pool(inputs,
@@ -493,7 +493,7 @@ def batch_norm_template_unused(inputs, is_training, scope, moments_dims, bn_deca
     # Operator that maintains moving averages of variables.
     # Need to set reuse=False, otherwise if reuse, will see moments_1/mean/ExponentialMovingAverage/ does not exist
     # https://github.com/shekkizh/WassersteinGAN.tensorflow/issues/3
-    with tf.compat.v1.variable_scope(tf.get_variable_scope(), reuse=False):
+    with tf.compat.v1.variable_scope(tf.compat.v1.get_variable_scope(), reuse=False):
         ema_apply_op = tf.cond(is_training,
                                lambda: ema.apply([batch_mean, batch_var]),
                                lambda: tf.no_op())
