@@ -14,6 +14,7 @@ import sys
 import time
 import fnmatch
 
+
 from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
@@ -379,7 +380,6 @@ def train():
                 pred_seg_p_gpu = []
                 pred_cls_p_gpu = []
                 pred_reg_p_gpu = []
-
                 total_loss_gpu = []
 
                 for i in range(NUM_GPUS):
@@ -1129,5 +1129,7 @@ def train_one_epoch_stage_2(sess, ops, train_writer):
 
 if __name__ == "__main__":
     log_string('pid: %s'%(str(os.getpid())))
-    train()
+    #train()
+    Trainer = NetworkTrainer(FLAGS, BASE_DIR, ROOT_DIR)
+    Trainer.build_Graph_3_1()
     LOG_FOUT.close()
