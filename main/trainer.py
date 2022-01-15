@@ -496,7 +496,8 @@ class NetworkTrainer:
                     total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
 
                 # here takes the post processing place.
-                corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_idx, corner_valid_mask_pair, corner_valid_mask_256_64, corner_pair_available = self.corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val[begin_idx:end_idx,:,:])
+                pred_labels_corner_p_val_softmax = tf.nn.softmax(pred_labels_corner_p_val[begin_idx:end_idx,:,:])
+                corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_idx, corner_valid_mask_pair, corner_valid_mask_256_64, corner_pair_available = self.corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val_softmax)
                 open_gt_labels_256_64, open_gt_labels_pair = self.corner_pair_label_generator(corner_pair_256_64_idx, \
                                                                             corner_pair_idx, \
                                                                             corner_valid_mask_pair, \
@@ -888,7 +889,7 @@ class NetworkTrainer:
             sampled points, its indices and valid masks
         """    
         
-        corner_points = tf.where(pred_corner[..., 1] > 0.999)
+        corner_points = tf.where(pred_corner[..., 1] > 0.97)
         corner_pair_available = [False]*self.DEVICE_BATCH_SIZE
         corner_valid_mask_pair = []
 
@@ -944,12 +945,12 @@ class NetworkTrainer:
                     #
                     # raise error or debug when within_range.shape[0] = 0
                     # or if within_range.shape[0] = 3?
-                    if 64 <= candidnate_num:
+                    if 63 <= candidnate_num:
                         idx_nums = tf.concat([tf.expand_dims(corner_pair_idx[per_batch][per_corner][0], axis = 0), tf.squeeze(tf.random.shuffle(tf.where(within_range[per_corner, :]))[:62]), tf.expand_dims(corner_pair_idx[per_batch][per_corner][-1], axis = 0)], axis = 0)
                         idx_256_64.append(tf.expand_dims(idx_nums, axis = 0))
                         valid_mask_256_64.append(tf.expand_dims(tf.ones_like(idx_nums), axis = 0))
 
-                    elif 0 < candidnate_num < 64:
+                    elif 0 < candidnate_num < 63:
                         n = candidnate_num
                         dummy_num = 64 - 1 - n
                         middle_indicies = tf.squeeze(tf.where(within_range[per_corner, :]))
@@ -988,7 +989,7 @@ class NetworkTrainer:
         batch_num = len(sample_corner_pairs_available)    
         sample_valid_mask_256_64_labels_for_loss = np.zeros((batch_num, 256, 64), dtype = np.int32) # output should be (batch_num, 256, 64, 2)
         sample_valid_mask_pair_labels_for_loss = np.zeros((batch_num, 256, 1), dtype = np.int16)
-        points_cloud_np = points_cloud.numpy()
+        points_cloud_np = points_cloud
         dist_threshold = 0.01
 
         # sample_valid_mask_256_64    
@@ -999,23 +1000,23 @@ class NetworkTrainer:
                 sample_valid_mask_pair_numpy = sample_pair_valid_mask[i].numpy()
                 k = 0
                 found_in_gt_open_pair = False
-                while sample_valid_mask_pair_numpy[k][0] == 1:
+                while k < 256 and sample_valid_mask_pair_numpy[k][0] == 1:
 
                     # per curve pair k in one batch
-                    if sample_pair_idx[i][k].numpy() in batch_open_gt_pair_idx[i, :, :]:
+                    if (sample_pair_idx[i][k].numpy() == batch_open_gt_pair_idx[i, :, :]).all(axis = 1).any():
                         found_in_gt_open_pair = True
                         # indices match exactly
-                        gt_idx = np.where(sample_pair_idx[i][k].numpy() in batch_open_gt_pair_idx[i, :, :])[0]
+                        gt_idx = np.where((sample_pair_idx[i][k].numpy() == batch_open_gt_pair_idx[i, :, :]).all(axis = 1))[0]
                         # gt_idx = np.where(batch_open_gt_pair_idx[i][k].numpy() in my_mat['open_gt_pair_idx'][0, 0])[0][0]
                         # my_mat[0, 0]['open_gt_256_64_idx'][gt_idx, :]
                         mask = np.in1d(sample_256_64_idx[i][k].numpy(), batch_open_gt_256_64_idx[i, :, :][gt_idx])
                         sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
                         sample_valid_mask_pair_labels_for_loss[i, k, 0] = 1
-                    elif np.flip(sample_pair_idx[i][k].numpy()) in batch_open_gt_pair_idx[i, :, :]:
+                    elif (np.flip(sample_pair_idx[i][k].numpy()) == batch_open_gt_pair_idx[i, :, :]).all(axis = 1).any():
                         found_in_gt_open_pair = True
-                        gt_idx = np.where(np.flip(sample_pair_idx[i][k].numpy()) in batch_open_gt_pair_idx[i, :, :])[0]
+                        gt_idx = np.where((np.flip(sample_pair_idx[i][k].numpy()) == batch_open_gt_pair_idx[i, :, :]).all(axis = 1))[0]
                         # my_mat[0, 0]['open_gt_256_64_idx'][gt_idx, :]
-                        mask = np.in1d(sample_pair_idx[i][k].numpy(), batch_open_gt_256_64_idx[i, :, :][gt_idx])
+                        mask = np.in1d(sample_256_64_idx[i][k].numpy(), batch_open_gt_256_64_idx[i, :, :][gt_idx])
                         # update here labels
                         sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
                         sample_valid_mask_pair_labels_for_loss[i, k, 0] = 1
