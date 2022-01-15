@@ -555,7 +555,7 @@ def eval_one_epoch(sess, ops, test_writer):
     #log_string(str(datetime.now()))
     #log_string('---- EPOCH %03d EVALUATION ----'%(EPOCH_CNT))
     # just use one matrix.
-    test_matrices_name = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '99.mat')
+    test_matrices_name = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '40.mat')
     loadpath = BASE_DIR + '/test_data/new_test/'+test_matrices_name[0]
     test_data = sio.loadmat(loadpath)['Training_data']
 
