@@ -14,7 +14,7 @@ import sys
 import time
 import fnmatch
 from trainer import NetworkTrainer
-
+os.environ['CUDA_VISIBLE_DEVICES']= '1,2'
 
 from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
