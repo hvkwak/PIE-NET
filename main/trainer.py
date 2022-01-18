@@ -9,6 +9,7 @@ import tensorflow as tf
 import numpy as np
 import fnmatch
 import time
+from tqdm import tqdm
 from datetime import datetime
 import scipy.io as sio
 
@@ -39,14 +40,19 @@ class NetworkTrainer:
         # STAGE = 1: Training, Section 3.1.
         # STAGE = 2: Training, Section 3.2.
         self.STAGE = FLAGS.stage
-        self.RESUME = FLAGS.resume
+        #self.RESUME = FLAGS.resume
 
         self.MODEL = importlib.import_module(FLAGS.model) # import network module
         self.MODEL_FILE = os.path.join(ROOT_DIR, 'models', FLAGS.model+'.py')
         if self.STAGE == 1:
             self.LOG_DIR = FLAGS.stage_1_log_dir
-        else:
+        elif self.STAGE == 2:
             self.LOG_DIR = FLAGS.stage_2_log_dir
+        elif self.STAGE == 3:
+            self.LOG_DIR = FLAGS.stage_2_log_dir
+        elif self.STAGE == 4:
+            self.LOG_DIR = FLAGS.stage_2_log_dir
+
         if not os.path.exists(self.LOG_DIR): 
             os.mkdir(self.LOG_DIR)
             os.system('cp %s %s' % (self.MODEL_FILE, self.LOG_DIR)) # bkp of model def
@@ -266,7 +272,7 @@ class NetworkTrainer:
             # load graph_31
             init_31 = tf.compat.v1.global_variables_initializer()
             self.sess_31.run(init_31)
-            self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_8.ckpt')
+            self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_198.ckpt')
             # build train ops
             self.train_ops_31 = {'pointclouds_pl': self.pointclouds_pl,
                                 'labels_edge_p': self.labels_edge_p,
@@ -317,10 +323,10 @@ class NetworkTrainer:
             self.merged_32 = tf.compat.v1.summary.merge_all()
             self.test_writer_32 = tf.compat.v1.summary.FileWriter(os.path.join(self.LOG_DIR, 'test'), self.sess_32.graph)
             # Init variables
-            if self.RESUME == 0:
+            if self.STAGE == 3:
                 init = tf.compat.v1.global_variables_initializer()
                 self.sess_32.run(init)
-            elif self.RESUME == 1:
+            elif self.STAGE == 4:
                 init = tf.compat.v1.global_variables_initializer()
                 self.sess_32.run(init)
                 self.saver_32.restore(self.sess_32, self.BASE_DIR+'/stage_1_log/model_32_100.ckpt')
@@ -355,7 +361,7 @@ class NetworkTrainer:
         # this is one epoch
         # take the batch first, then run sessions sequentially.
         is_training_31 = self.STAGE == 1 # train until Sec. 3.1.
-        is_training_32 = self.STAGE == 2 # train until Sec. 3.2.
+        is_training_32 = self.STAGE == 3 # train until Sec. 3.2.
         train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/train_data/new_train/'), '*.mat')
         matrix_num = len(train_matrices_names_list)
         permutation = np.random.permutation(matrix_num)
@@ -508,7 +514,7 @@ class NetworkTrainer:
                 corner_pair_sample_points = tf.concat([corner_pair_sample_points[i] for i in range(len(corner_pair_sample_points))], axis = 0) # this will be [N, 64, 3]
                 #corner_pair_sample_points_label = tf.concat([corner_pair_sample_points_label[i] for i in range(len(corner_pair_sample_points_label))], axis = 0)
                 corner_valid_mask_256_64 = tf.concat([corner_valid_mask_256_64[i] for i in range(len(corner_valid_mask_256_64))], axis = 0) 
-
+                
                 #
 
                 with self.graph_32.as_default():
@@ -576,13 +582,13 @@ class NetworkTrainer:
             self.test_writer_31 = tf.compat.v1.summary.FileWriter(os.path.join(self.LOG_DIR, 'test'), self.sess_31.graph)        
 
             # Init variables
-            if self.RESUME == 0:
+            if self.STAGE == 1:
                 init = tf.compat.v1.global_variables_initializer()
                 self.sess_31.run(init)
-            elif self.RESUME == 1:
+            elif self.STAGE == 2 or self.STAGE == 3:
                 init = tf.compat.v1.global_variables_initializer()
                 self.sess_31.run(init)
-                self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_0.ckpt')
+                self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_198.ckpt')
 
             
             self.train_ops_31 = {'pointclouds_pl': self.pointclouds_pl,
@@ -889,13 +895,22 @@ class NetworkTrainer:
             sampled points, its indices and valid masks
         """    
         
-        corner_points = tf.where(pred_corner[..., 1] > 0.97)
-        corner_pair_available = [False]*self.DEVICE_BATCH_SIZE
+        #corner_points = tf.where(pred_corner[..., 1] > 0.99)
+        corner_pair_available = [False]*self.BATCH_SIZE
         corner_valid_mask_pair = []
-
-        # organize corner_pairs per batch
         corner_pair_idx = []
-        for per_batch in tf.range(self.DEVICE_BATCH_SIZE, dtype = tf.int64):
+        for per_batch in tf.range(self.BATCH_SIZE, dtype = tf.int64):
+            threshold = 0.995
+            N = tf.where(pred_corner[per_batch, ...][..., 1] > threshold).shape[0]
+            while not 10 <= N*(N-1)//2 <= 256:
+                if N*(N-1)//2 > 256:
+                    threshold = threshold + 0.0001	
+                elif N*(N-1)//2 < 10:
+                    threshold = threshold - 0.005
+                N = tf.where(pred_corner[per_batch, ...][..., 1] > threshold).shape[0]
+
+            corner_points = tf.where(pred_corner[per_batch, ...][..., 1] > threshold)
+            corner_points = tf.concat([(tf.zeros_like(corner_points) + per_batch), corner_points], axis = 1)
             idx = tf.boolean_mask(corner_points, corner_points[:,0] == per_batch)[:,1]
             if idx.shape[0] > 1:
                 corner_pair_available[per_batch] = True
@@ -905,13 +920,26 @@ class NetworkTrainer:
                 corner_pair_idx.append(two_col[two_col[:,0] < two_col[:, 1]])
             else:
                 corner_pair_idx.append([])
-                
 
+        '''
+        # organize corner_pairs per batch
+        corner_pair_idx = []
+        for per_batch in tf.range(self.BATCH_SIZE, dtype = tf.int64):
+            idx = tf.boolean_mask(corner_points, corner_points[:,0] == per_batch)[:,1]
+            if idx.shape[0] > 1:
+                corner_pair_available[per_batch] = True
+                idx_r = tf.repeat(idx, idx.shape[0])
+                idx_b = tf.tile(idx, [idx.shape[0]])
+                two_col = tf.stack([idx_r, idx_b], 1)
+                corner_pair_idx.append(two_col[two_col[:,0] < two_col[:, 1]])
+            else:
+                corner_pair_idx.append([])
+        '''
         # per batch sample the points
         corner_pair_256_64_idx = []
         corner_pair_sample_points = [] # (8, 256, 64, 3)
         corner_valid_mask_256_64 = []
-        for per_batch in tf.range(self.DEVICE_BATCH_SIZE, dtype = tf.int64):
+        for per_batch in tf.range(self.BATCH_SIZE, dtype = tf.int64):
             rest_num = 256
             if corner_pair_available[per_batch]:
 
@@ -930,14 +958,14 @@ class NetworkTrainer:
 
                 # per corner pair within this batch, subsample the indicies
                 idx_256_64 = []
-                valid_mask_256_64 = []
+                valid_mask_256_64 = []                            
                 corner_pair_num = within_range.shape[0]
                 
                 # if there are more than 256 pairs, just take first 256.
                 if corner_pair_num > 256 : corner_pair_num = 256
                 rest_num = 256 - corner_pair_num
 
-                for per_corner in tf.range(corner_pair_num):
+                for per_corner in tf.range(corner_pair_num, dtype = tf.int64):
                     # make sure that corner points(end points) are not within the range.
                     assert tf.gather(within_range[per_corner, :], corner_pair_idx[per_batch][per_corner])[0] == tf.constant([False])
                     assert tf.gather(within_range[per_corner, :], corner_pair_idx[per_batch][per_corner])[1] == tf.constant([False])
@@ -959,7 +987,12 @@ class NetworkTrainer:
                         idx_nums = tf.concat([tf.expand_dims(corner_pair_idx[per_batch][per_corner][0], axis = 0), middle_indicies, tf.repeat(corner_pair_idx[per_batch][per_corner][-1], dummy_num)], axis = 0)
                         idx_256_64.append(tf.expand_dims(idx_nums, axis = 0))
                         valid_mask_256_64.append(tf.expand_dims(tf.concat([tf.ones((64 - (dummy_num - 1)), dtype = tf.int64), tf.zeros((dummy_num - 1), dtype = tf.int64)], axis = 0), axis = 0))
-
+                    
+                    elif candidnate_num == 0:
+                        dummy_num = 63
+                        idx_nums = tf.concat([tf.expand_dims(corner_pair_idx[per_batch][per_corner][0], axis = 0), tf.repeat(corner_pair_idx[per_batch][per_corner][-1], dummy_num)], axis = 0)
+                        idx_256_64.append(tf.expand_dims(idx_nums, axis = 0))
+                        valid_mask_256_64.append(tf.expand_dims(tf.concat([tf.ones((64 - (dummy_num - 1)), dtype = tf.int64), tf.zeros((dummy_num - 1), dtype = tf.int64)], axis = 0), axis = 0))
                 if rest_num > 0: 
                     idx_256_64.append(tf.zeros((rest_num, 64), dtype = tf.int64))
                     valid_mask_256_64.append(tf.zeros((rest_num, 64), dtype = tf.int64))
@@ -970,7 +1003,6 @@ class NetworkTrainer:
                 corner_pair_256_64_idx.append(tf.zeros((rest_num, 64), dtype = tf.int64))
                 corner_valid_mask_256_64.append(tf.zeros((rest_num, 64), dtype = tf.int64))
                 corner_pair_sample_points.append(tf.zeros((rest_num, 64, 3), dtype = tf.float32))
-
             valid_mask = tf.expand_dims(tf.cast(tf.sequence_mask(256 - rest_num, 256), dtype=tf.uint8), axis = 1)
             corner_valid_mask_pair.append(valid_mask)
 
@@ -990,7 +1022,7 @@ class NetworkTrainer:
         sample_valid_mask_256_64_labels_for_loss = np.zeros((batch_num, 256, 64), dtype = np.int32) # output should be (batch_num, 256, 64, 2)
         sample_valid_mask_pair_labels_for_loss = np.zeros((batch_num, 256, 1), dtype = np.int16)
         points_cloud_np = points_cloud
-        dist_threshold = 0.01
+        dist_threshold = 0.5
 
         # sample_valid_mask_256_64    
         
@@ -999,12 +1031,11 @@ class NetworkTrainer:
             if sample_corner_pairs_available[i]:
                 sample_valid_mask_pair_numpy = sample_pair_valid_mask[i].numpy()
                 k = 0
-                found_in_gt_open_pair = False
+                
                 while k < 256 and sample_valid_mask_pair_numpy[k][0] == 1:
 
                     # per curve pair k in one batch
                     if (sample_pair_idx[i][k].numpy() == batch_open_gt_pair_idx[i, :, :]).all(axis = 1).any():
-                        found_in_gt_open_pair = True
                         # indices match exactly
                         gt_idx = np.where((sample_pair_idx[i][k].numpy() == batch_open_gt_pair_idx[i, :, :]).all(axis = 1))[0]
                         # gt_idx = np.where(batch_open_gt_pair_idx[i][k].numpy() in my_mat['open_gt_pair_idx'][0, 0])[0][0]
@@ -1012,36 +1043,44 @@ class NetworkTrainer:
                         mask = np.in1d(sample_256_64_idx[i][k].numpy(), batch_open_gt_256_64_idx[i, :, :][gt_idx])
                         sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
                         sample_valid_mask_pair_labels_for_loss[i, k, 0] = 1
+                        k = k+1
+                        continue
                     elif (np.flip(sample_pair_idx[i][k].numpy()) == batch_open_gt_pair_idx[i, :, :]).all(axis = 1).any():
-                        found_in_gt_open_pair = True
                         gt_idx = np.where((np.flip(sample_pair_idx[i][k].numpy()) == batch_open_gt_pair_idx[i, :, :]).all(axis = 1))[0]
                         # my_mat[0, 0]['open_gt_256_64_idx'][gt_idx, :]
                         mask = np.in1d(sample_256_64_idx[i][k].numpy(), batch_open_gt_256_64_idx[i, :, :][gt_idx])
                         # update here labels
                         sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
                         sample_valid_mask_pair_labels_for_loss[i, k, 0] = 1
+                        k = k+1
+                        continue
 
-                    if not found_in_gt_open_pair:
                     # not exact match, but see if there is one nearby.
-                        # calculate distances NN.
-                        distance = np.sqrt(np.sum((points_cloud_np[i][sample_pair_idx[i][k].numpy(), :] - points_cloud_np[i][batch_open_gt_pair_idx[i, :, :], :])**2, axis = 2))
-                        if (distance < np.array([dist_threshold, dist_threshold])).all(axis = 1).sum() > 0:
-                            found_in_gt_open_pair = True
-                            gt_indices = np.where((distance < np.array([dist_threshold, dist_threshold])).all(axis = 1))[0]
-                            gt_idx = gt_indices[np.argmin(distance[gt_indices, :].mean(axis = 1))]
-                            mask = np.in1d(sample_256_64_idx[i][k].numpy(), batch_open_gt_256_64_idx[i, :, :][gt_idx])
-                            sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
-                            sample_valid_mask_pair_labels_for_loss[i, k, 0] = 1
+                    # calculate distances NN.
+                    distance = np.sqrt(np.sum((points_cloud_np[i][sample_pair_idx[i][k].numpy(), :] - points_cloud_np[i][batch_open_gt_pair_idx[i, :, :], :])**2, axis = 2))
+                    if (distance < np.array([dist_threshold, dist_threshold])).all(axis = 1).sum() > 0:
+                        found_in_gt_open_pair = True
+                        gt_indices = np.where((distance < np.array([dist_threshold, dist_threshold])).all(axis = 1))[0]
+                        gt_idx = gt_indices[np.argmin(distance[gt_indices, :].mean(axis = 1))]
+                        mask = np.in1d(sample_256_64_idx[i][k].numpy(), batch_open_gt_256_64_idx[i, :, :][gt_idx])
+                        mask[0], mask[-1] = True, True
+                        sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
+                        sample_valid_mask_pair_labels_for_loss[i, k, 0] = 1
+                        k = k+1
+                        continue
                     
-                    if not found_in_gt_open_pair:
-                        distance = np.sqrt(np.sum((points_cloud_np[i][np.flip(sample_pair_idx[i][k].numpy()), :] - points_cloud_np[i][batch_open_gt_pair_idx[i, :, :], :])**2, axis = 2))
-                        if (distance < np.array([dist_threshold, dist_threshold])).all(axis = 1).sum() > 0:
-                            found_in_gt_open_pair = True
-                            gt_indices = np.where((distance < np.array([dist_threshold, dist_threshold])).all(axis = 1))[0]
-                            gt_idx = gt_indices[np.argmin(distance[gt_indices, :].mean(axis = 1))]
-                            mask = np.in1d(sample_256_64_idx[i][k].numpy(), batch_open_gt_256_64_idx[i, :, :][gt_idx])
-                            sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
-                            sample_valid_mask_pair_labels_for_loss[i, k, 0] = 1
+
+                    distance = np.sqrt(np.sum((points_cloud_np[i][np.flip(sample_pair_idx[i][k].numpy()), :] - points_cloud_np[i][batch_open_gt_pair_idx[i, :, :], :])**2, axis = 2))
+                    if (distance < np.array([dist_threshold, dist_threshold])).all(axis = 1).sum() > 0:
+                        found_in_gt_open_pair = True
+                        gt_indices = np.where((distance < np.array([dist_threshold, dist_threshold])).all(axis = 1))[0]
+                        gt_idx = gt_indices[np.argmin(distance[gt_indices, :].mean(axis = 1))]
+                        mask = np.in1d(sample_256_64_idx[i][k].numpy(), batch_open_gt_256_64_idx[i, :, :][gt_idx])
+                        mask[0], mask[-1] = True, True
+                        sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
+                        sample_valid_mask_pair_labels_for_loss[i, k, 0] = 1
+                        k = k+1
+                        continue
                     k = k+1
 
         return sample_valid_mask_256_64_labels_for_loss, sample_valid_mask_pair_labels_for_loss
