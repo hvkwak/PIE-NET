@@ -514,7 +514,9 @@ class NetworkTrainer:
                 corner_pair_sample_points = tf.concat([corner_pair_sample_points[i] for i in range(len(corner_pair_sample_points))], axis = 0) # this will be [N, 64, 3]
                 #corner_pair_sample_points_label = tf.concat([corner_pair_sample_points_label[i] for i in range(len(corner_pair_sample_points_label))], axis = 0)
                 corner_valid_mask_256_64 = tf.concat([corner_valid_mask_256_64[i] for i in range(len(corner_valid_mask_256_64))], axis = 0) 
-                
+                corner_pair_sample_points = tf.cast(corner_pair_sample_points, dtype = tf.float32)
+                corner_valid_mask_256_64 = tf.cast(corner_valid_mask_256_64, dtype = tf.int32)
+                open_gt_labels_pair = tf.cast(open_gt_labels_pair, dtype = tf.int32)
                 #
 
                 with self.graph_32.as_default():
@@ -946,7 +948,7 @@ class NetworkTrainer:
                 # first increase the precision to float64, 
                 # otherwise it may go wrong when it comes to finding points within radius, 
                 # where it may also include the two corner points at the end.
-                points_cloud = tf.cast(points_cloud, dtype = tf.float64) 
+                points_cloud = tf.cast(points_cloud, dtype = tf.float64)
 
                 # find neighbors
                 xyz1 = tf.gather(points_cloud[per_batch], indices=corner_pair_idx[per_batch][:, 0], axis=0)
@@ -1082,5 +1084,5 @@ class NetworkTrainer:
                         k = k+1
                         continue
                     k = k+1
-
-        return sample_valid_mask_256_64_labels_for_loss, sample_valid_mask_pair_labels_for_loss
+        
+        return tf.reshape(sample_valid_mask_256_64_labels_for_loss, [-1, 64]), tf.reshape(sample_valid_mask_pair_labels_for_loss, [-1, 1])
