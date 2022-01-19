@@ -410,9 +410,8 @@ class NetworkTrainer:
             pred_labels_corner_p_val = np.zeros((num_data, self.NUM_POINT, 2), np.float32)
             pred_reg_edge_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
             pred_reg_corner_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
-            pred_open_curve_seg = np.zeros((num_data*256, self.NUM_POINT, 3), np.float32)
+            pred_open_curve_seg = np.zeros((num_data*256, 64, 2), np.float32)
             np.random.shuffle(train_data)
-            
             for j in range(num_batch):
                 # remember that num_batch will be 8
                 begin_idx = j*self.BATCH_SIZE
@@ -518,6 +517,10 @@ class NetworkTrainer:
                 corner_valid_mask_256_64 = tf.cast(corner_valid_mask_256_64, dtype = tf.int32)
                 open_gt_labels_pair = tf.cast(open_gt_labels_pair, dtype = tf.int32)
                 #
+                corner_pair_sample_points = corner_pair_sample_points.numpy()
+                corner_valid_mask_256_64 = corner_valid_mask_256_64.numpy()
+                open_gt_labels_256_64 = open_gt_labels_256_64.numpy()
+                open_gt_labels_pair = open_gt_labels_pair.numpy()
 
                 with self.graph_32.as_default():
                     

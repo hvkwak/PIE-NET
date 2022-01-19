@@ -2,7 +2,6 @@
 # Some of the codes are from https://github.com/charlesq34/pointnet2/blob/master/train_multi_gpu.py
 #
 import argparse
-import math
 from datetime import datetime
 import h5py
 import numpy as np
