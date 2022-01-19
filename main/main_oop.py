@@ -50,7 +50,7 @@ if __name__ == "__main__":
     Trainer.log_string('pid: %s'%(str(os.getpid())))
     Trainer.build_graph_31()
     #Trainer.train_graph_31()
-    Trainer.build_graph_32()
+    #Trainer.build_graph_32()
     Trainer.train_graph_32()
     #Trainer.build_graph_31()
     #Trainer.train_graph_31()

@@ -311,8 +311,9 @@ class NetworkTrainer:
                                 'train_op': self.train_optimizer_31,
                                 'merged': self.merged_31,
                                 'step': self.batch_31}
-
+        tf.compat.v1.reset_default_graph()
         # init graph_32
+        '''
         with self.graph_32.as_default():
             # Create a session
             config_32 = tf.compat.v1.ConfigProto()
@@ -343,6 +344,7 @@ class NetworkTrainer:
                'train_op': self.train_optimizer_32,
                'merged': self.merged_32,
                'step': self.batch_32}
+        '''
 
         for epoch in range(self.MAX_EPOCH):
             self.log_string('**** TRAIN EPOCH %03d ****' % (epoch))
@@ -352,19 +354,24 @@ class NetworkTrainer:
             #eval_one_epoch(sess, ops, test_writer)
             #sys.stdout.flush()
             # Save the variables to disk.
+            '''
             if epoch % 2 == 0:
                 model_ccc_path = "model"+str(epoch)+".ckpt"
                 save_path = self.saver_32.save(self.sess_32, os.path.join(self.LOG_DIR, model_ccc_path))
                 self.log_string("Model saved in file: %s" % save_path)
+            '''
 
     def train_one_epoch_32(self):
         # this is one epoch
         # take the batch first, then run sessions sequentially.
-        is_training_31 = self.STAGE == 1 # train until Sec. 3.1.
+        #is_training_31 = True
+        #is_training_31 = self.STAGE == 1 # train until Sec. 3.1.
+        is_training_31 = True
         is_training_32 = self.STAGE == 3 # train until Sec. 3.2.
         train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/train_data/new_train/'), '*.mat')
         matrix_num = len(train_matrices_names_list)
-        permutation = np.random.permutation(matrix_num)
+        #permutation = np.random.permutation(matrix_num)
+        permutation = np.array([0, 2, 3, 1])
         for i in range(len(permutation)//4):
             load_data_start_time = time.time()
             loadpath = self.BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4]]
@@ -411,7 +418,7 @@ class NetworkTrainer:
             pred_reg_edge_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
             pred_reg_corner_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
             pred_open_curve_seg = np.zeros((num_data*256, 64, 2), np.float32)
-            np.random.shuffle(train_data)
+            #np.random.shuffle(train_data)
             for j in range(num_batch):
                 # remember that num_batch will be 8
                 begin_idx = j*self.BATCH_SIZE
@@ -501,6 +508,7 @@ class NetworkTrainer:
                     total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
 
                 # here takes the post processing place.
+                '''
                 pred_labels_corner_p_val_softmax = tf.nn.softmax(pred_labels_corner_p_val[begin_idx:end_idx,:,:])
                 corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_idx, corner_valid_mask_pair, corner_valid_mask_256_64, corner_pair_available = self.corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val_softmax)
                 open_gt_labels_256_64, open_gt_labels_pair = self.corner_pair_label_generator(corner_pair_256_64_idx, \
@@ -540,38 +548,41 @@ class NetworkTrainer:
                     # loss
                     total_seg_3_2_loss += seg_3_2_loss_val
                     total_loss_3_2 += loss_3_2_val
+                '''
 
-
-                # total loss
-                total_loss_3_1 = total_loss_3_1 * 1.0 / num_batch
-                total_edge_3_1_loss = total_edge_3_1_loss * 1.0 / num_batch
-                total_edge_3_1_acc = total_edge_3_1_acc * 1.0 / num_batch
-                total_edge_3_1_recall = total_edge_3_1_recall * 1.0 / num_batch
-                total_corner_3_1_loss = total_corner_3_1_loss * 1.0 / num_batch
-                total_corner_3_1_acc = total_corner_3_1_acc * 1.0 / num_batch
-                total_corner_3_1_recall = total_corner_3_1_recall * 1.0 / num_batch
-                total_reg_edge_3_1_loss = total_reg_edge_3_1_loss * 1.0 / num_batch
-                total_reg_corner_3_1_loss = total_reg_corner_3_1_loss * 1.0 / num_batch
-
-                total_loss_3_2 = total_loss_3_2 * 1.0 / num_batch
-                total_seg_3_2_loss = total_seg_3_2_loss * 1.0 / num_batch
+            # total loss
+            total_loss_3_1 = total_loss_3_1 * 1.0 / num_batch
+            total_edge_3_1_loss = total_edge_3_1_loss * 1.0 / num_batch
+            total_edge_3_1_acc = total_edge_3_1_acc * 1.0 / num_batch
+            total_edge_3_1_recall = total_edge_3_1_recall * 1.0 / num_batch
+            total_corner_3_1_loss = total_corner_3_1_loss * 1.0 / num_batch
+            total_corner_3_1_acc = total_corner_3_1_acc * 1.0 / num_batch
+            total_corner_3_1_recall = total_corner_3_1_recall * 1.0 / num_batch
+            total_reg_edge_3_1_loss = total_reg_edge_3_1_loss * 1.0 / num_batch
+            total_reg_corner_3_1_loss = total_reg_corner_3_1_loss * 1.0 / num_batch
+            '''
+            total_loss_3_2 = total_loss_3_2 * 1.0 / num_batch
+            total_seg_3_2_loss = total_seg_3_2_loss * 1.0 / num_batch
+            '''
                 
-                process_duration = time.time() - process_start_time
-                examples_per_sec = num_data/process_duration
-                sec_per_batch = process_duration/num_batch
-                self.log_string('\t%s: step: %f total_loss_3_2: %f duration time %.3f (%.1f examples/sec; %.3f sec/batch)' \
-                % (datetime.now(),step,total_loss_3_2,process_duration,examples_per_sec,sec_per_batch))
-                self.log_string('\t\tTest Total_3_1 Mean_Loss: %f' % total_loss_3_1)
-                self.log_string('\t\tTest Edge_3_1 Mean_Loss: %f' % total_edge_3_1_loss)
-                self.log_string('\t\tTest Edge_3_1 Mean_Accuracy: %f' % total_edge_3_1_acc)
-                self.log_string('\t\tTest Edge_3_1 Mean_Recall: %f' % total_edge_3_1_recall)
-                self.log_string('\t\tTest Corner_3_1 Mean_Loss: %f' % total_corner_3_1_loss)
-                self.log_string('\t\tTest Corner_3_1 Mean_Accuracy: %f' % total_corner_3_1_acc)
-                self.log_string('\t\tTest Corner_3_1 Mean_Recall: %f' % total_corner_3_1_recall)
-                self.log_string('\t\tTest Reg_Edge_3_1 Mean_Loss: %f' % total_reg_edge_3_1_loss)
-                self.log_string('\t\tTest Reg_Corner_3_1 Mean_Loss: %f' % total_reg_corner_3_1_loss)
-                self.log_string('\t\tTraining Total_3_2 Mean_Loss: %f' % total_loss_3_2)
-                self.log_string('\t\tTraining Seg_3_2 Mean_Loss: %f' % total_seg_3_2_loss)
+            process_duration = time.time() - process_start_time
+            examples_per_sec = num_data/process_duration
+            sec_per_batch = process_duration/num_batch
+            self.log_string('\t%s: step: %f total_loss_3_2: %f duration time %.3f (%.1f examples/sec; %.3f sec/batch)' \
+            % (datetime.now(),step,total_loss_3_1,process_duration,examples_per_sec,sec_per_batch))
+            self.log_string('\t\tTest Total_3_1 Mean_Loss: %f' % total_loss_3_1)
+            self.log_string('\t\tTest Edge_3_1 Mean_Loss: %f' % total_edge_3_1_loss)
+            self.log_string('\t\tTest Edge_3_1 Mean_Accuracy: %f' % total_edge_3_1_acc)
+            self.log_string('\t\tTest Edge_3_1 Mean_Recall: %f' % total_edge_3_1_recall)
+            self.log_string('\t\tTest Corner_3_1 Mean_Loss: %f' % total_corner_3_1_loss)
+            self.log_string('\t\tTest Corner_3_1 Mean_Accuracy: %f' % total_corner_3_1_acc)
+            self.log_string('\t\tTest Corner_3_1 Mean_Recall: %f' % total_corner_3_1_recall)
+            self.log_string('\t\tTest Reg_Edge_3_1 Mean_Loss: %f' % total_reg_edge_3_1_loss)
+            self.log_string('\t\tTest Reg_Corner_3_1 Mean_Loss: %f' % total_reg_corner_3_1_loss)
+            '''
+            self.log_string('\t\tTraining Total_3_2 Mean_Loss: %f' % total_loss_3_2)
+            self.log_string('\t\tTraining Seg_3_2 Mean_Loss: %f' % total_seg_3_2_loss)
+            '''
 
     def train_graph_31(self):
         
@@ -648,10 +659,12 @@ class NetworkTrainer:
                     self.log_string("Model saved in file: %s" % save_path)
 
     def train_one_epoch_31(self):
-        is_training_31 = True # train until Sec. 3.1.
+        #is_training_31 = self.STAGE == 1 # train until Sec. 3.1.
+        is_training_31 = True
         train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/train_data/new_train/'), '*.mat')
         matrix_num = len(train_matrices_names_list)
-        permutation = np.random.permutation(matrix_num)
+        #permutation = np.random.permutation(matrix_num)
+        permutation = np.array([0, 2, 3, 1])
         for i in range(len(permutation)//4):
             load_data_start_time = time.time()
             loadpath = self.BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4]]
@@ -696,7 +709,7 @@ class NetworkTrainer:
             pred_reg_edge_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
             pred_reg_corner_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
 
-            np.random.shuffle(train_data)
+            #np.random.shuffle(train_data)
             for j in range(num_batch):
                 # remember that num_batch will be 8
                 begin_idx = j*self.BATCH_SIZE
