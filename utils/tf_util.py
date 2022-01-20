@@ -466,7 +466,7 @@ def avg_pool3d(inputs,
                                name=sc.name)
     return outputs
 
-
+'''
 def batch_norm_template_unused(inputs, is_training, scope, moments_dims, bn_decay):
   """ NOTE: this is older version of the util func. it is deprecated.
   Batch normalization on convolutional maps and beyond...
@@ -509,8 +509,8 @@ def batch_norm_template_unused(inputs, is_training, scope, moments_dims, bn_deca
                         lambda: (ema.average(batch_mean), ema.average(batch_var)))
     normed = tf.nn.batch_normalization(inputs, mean, var, beta, gamma, 1e-3)
   return normed
-
-
+'''
+'''
 def batch_norm_template(inputs, is_training, scope, moments_dims_unused, bn_decay, data_format='NHWC'):
   """ Batch normalization on convolutional maps and beyond...
   Ref.: http://stackoverflow.com/questions/33949786/how-could-i-use-batch-normalization-in-tensorflow
@@ -531,7 +531,7 @@ def batch_norm_template(inputs, is_training, scope, moments_dims_unused, bn_deca
                                       is_training=is_training, decay=bn_decay,updates_collections=None,
                                       scope=scope,
                                       data_format=data_format)
-
+'''
 
 def batch_norm_for_fc(inputs, is_training, bn_decay, scope):
   """ Batch normalization on FC data.

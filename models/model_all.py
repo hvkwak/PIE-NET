@@ -22,6 +22,7 @@ def placeholder_inputs_32(batch_size):
     open_gt_corner_valid_mask_256_64 = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256, 64))
     open_gt_labels_256_64 = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256, 64))
     open_gt_labels_pair = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256, 1))
+    open_gt_type_cls_label = tf.compat.v1.placeholder(tf.int32, shape = (batch_size*256))
 
     #open_gt_256_64_idx_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
     #open_gt_mask_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,64))
@@ -30,7 +31,7 @@ def placeholder_inputs_32(batch_size):
     #open_gt_sample_points_pl = tf.compat.v1.placeholder(tf.float32, shape = (batch_size,256,64,3))
     #open_gt_valid_mask_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,1))
     #open_gt_pair_idx_pl = tf.compat.v1.placeholder(tf.int32, shape = (batch_size,256,2))
-    return open_gt_corner_pair_sample_points_pl, open_gt_corner_valid_mask_256_64, open_gt_labels_256_64, open_gt_labels_pair
+    return open_gt_corner_pair_sample_points_pl, open_gt_corner_valid_mask_256_64, open_gt_labels_256_64, open_gt_labels_pair, open_gt_type_cls_label
 
 def placeholder_inputs_31(batch_size,num_point):
     pointclouds_pl = tf.compat.v1.placeholder(tf.float32,shape=(batch_size,num_point,3))  # input
@@ -90,7 +91,6 @@ def get_model_32(point_cloud, is_training, bn_decay=None):
     global_feat = tf_util.max_pool2d(net, [num_point,1],
                                      padding='VALID', scope='maxpool')
 
-    '''
     # this goes to classification.
     global_feat_reshape = tf.reshape(global_feat, [batch_size, -1])
 
@@ -103,8 +103,8 @@ def get_model_32(point_cloud, is_training, bn_decay=None):
                                   scope='stage2/cls/fc2', bn_decay=bn_decay)
     class_head = tf_util.dropout(class_head, keep_prob=0.7, is_training=is_training,
                           scope='stage2/cls/dp2')
-    pred_open_curve_cls = tf_util.fully_connected(class_head, 2, activation_fn=None, scope='stage2/cls/fc3')     # 0/1
-    '''
+    pred_open_curve_cls = tf_util.fully_connected(class_head, 4, activation_fn=None, scope='stage2/cls/fc3')
+
 
     # head 1: Segmentation, this determines wheter a particular point belongs to the candidate curve.
     global_feat_expand = tf.tile(global_feat, [1, num_point, 1, 1])
@@ -144,7 +144,7 @@ def get_model_32(point_cloud, is_training, bn_decay=None):
     pred_open_curve_reg = tf_util.fully_connected(regression_head, 9, activation_fn=None, scope='stage2/reg/fc3') # 3 coordinates
     '''
     
-    return pred_open_curve_seg, end_points
+    return pred_open_curve_seg, pred_open_curve_cls, end_points
 
 def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
     """ Part segmentation PointNet, input is BxNx6 (XYZ NormalX NormalY NormalZ), output Bx50 """
@@ -232,9 +232,11 @@ def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
 
 
 def get_stage_2_loss(pred_open_curve_seg, \
+                     pred_open_curve_cls,\
                      gt_256_64_labels, \
                      gt_256_64_valid_mask, \
                      gt_pair_valid_mask, \
+                     gt_type_label,
                      #pred_open_curve_reg, \
                      #end_points, \
                      #batch_open_gt_res, \
@@ -246,13 +248,18 @@ def get_stage_2_loss(pred_open_curve_seg, \
                      #batch_open_gt_type,\
                      end_points, \
                      reg_weight = 0.001):
-
+    
     # Enforce the transformation as orthogonal matrix
     transform = end_points['transform'] # BxKxK
     K = transform.get_shape()[1]
     mat_diff = tf.matmul(transform, tf.transpose(a=transform, perm=[0,2,1])) # use perm [0, 2, 1] to keep batch
     mat_diff -= tf.constant(np.eye(K), dtype=tf.float32)
-    mat_diff_loss = tf.nn.l2_loss(mat_diff) 
+    mat_diff_loss = tf.nn.l2_loss(mat_diff)
+    #print_op = tf.compat.v1.print("Debug output:", mat_diff_loss)
+    #with tf.control_dependencies([print_op]):
+    #    mat_diff_loss = tf.compat.v1.identity(mat_diff_loss)
+        
+    #tf.print(mat_diff_loss)
     #tf.compat.v1.summary.scalar('mat loss', mat_diff_loss)
 
     # Loss computation
@@ -265,15 +272,28 @@ def get_stage_2_loss(pred_open_curve_seg, \
     # Change this accordingly. make sure that loss balancing takes place.
     mask_256_64 = tf.cast(gt_256_64_valid_mask, tf.float32)
     neg_mask_256_64 = tf.ones_like(mask_256_64) - mask_256_64
-    Np_256_64 = tf.expand_dims(tf.reduce_sum(mask_256_64, axis=1),1)
+    Np_256_64 = tf.expand_dims(tf.reduce_sum(mask_256_64, axis=1),1) + 0.001
     Nn_256_64 = tf.expand_dims(tf.reduce_sum(neg_mask_256_64, axis=1),1)
+
+    #print_op2 = tf.compat.v1.print("Debug output mask_256_64:", mask_256_64, mask_256_64.shape)
+    #with tf.control_dependencies([print_op2]):
+    #    mask_256_64 = tf.compat.v1.identity(mask_256_64)
+
+    #print_op3 = tf.compat.v1.print("Debug output Np_256_64:", Np_256_64, Np_256_64.shape)
+    #with tf.control_dependencies([print_op3]):
+    #    Np_256_64 = tf.compat.v1.identity(Np_256_64)        
 
     mask_pair = tf.cast(gt_pair_valid_mask, tf.float32)
     neg_mask_pair = tf.ones_like(mask_pair) - mask_pair
-    Np_pair = tf.reduce_sum(mask_pair)
+    Np_pair = tf.reduce_sum(mask_pair) + 0.001
     Nn_pair = tf.reduce_sum(neg_mask_pair)
 
     seg_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits = pred_open_curve_seg, labels = gt_256_64_labels)
+
+    #print_op1 = tf.compat.v1.print("Debug output seg_entropy_loss:", seg_entropy_loss, seg_entropy_loss.shape)
+    #with tf.control_dependencies([print_op1]):
+    #    seg_entropy_loss = tf.compat.v1.identity(seg_entropy_loss)
+    
     seg_entropy_loss_valid_256_64 = seg_entropy_loss*(mask_256_64*(Nn_256_64/Np_256_64)+1)
     seg_3_2_loss = tf.reduce_mean(seg_entropy_loss_valid_256_64*(mask_pair*(Nn_pair/Np_pair)+1))
     
@@ -281,7 +301,18 @@ def get_stage_2_loss(pred_open_curve_seg, \
     #seg_3_2_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_open_curve_seg, axis = 2, output_type=tf.int32), gt_256_64_labels), tf.float32)*mask, axis = 1) / tf.reduce_sum(mask, axis = 1))
     #seg_3_2_acc = tf.reduce_mean(tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_open_curve_seg, axis = 2, output_type=tf.int32), gt_256_64_labels), tf.float32)*mask, axis = 1) / tf.reduce_sum(mask, axis = 1))
     
-    loss = seg_3_2_loss + mat_diff_loss*reg_weight
+    cls_entropy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=pred_open_curve_cls, labels=gt_type_label)
+    cls_3_2_loss = tf.reduce_mean(input_tensor=cls_entropy_loss*(mask_pair*(Nn_pair/Np_pair)+1))
+    tf.compat.v1.summary.scalar('cls_entropy_loss', cls_3_2_loss)
+
+
+
+
+
+
+
+
+    loss = seg_3_2_loss + mat_diff_loss*reg_weight + cls_3_2_loss
     
 
 
@@ -318,7 +349,7 @@ def get_stage_2_loss(pred_open_curve_seg, \
                         labels_edge_p),tf.float32),axis = 1)/num_point)
     '''
 
-    return loss
+    return loss, seg_3_2_loss, cls_3_2_loss
     #return seg_3_2_loss, seg_3_2_acc, loss + mat_diff_loss*reg_weight
 
 def get_stage_1_loss(pred_labels_edge_p, \
