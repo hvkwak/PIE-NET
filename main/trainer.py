@@ -73,12 +73,12 @@ class NetworkTrainer:
     def build_graph_32(self):
         with self.graph_32.as_default():
             with tf.device('/cpu:0'):
-                self.open_gt_corner_pair_sample_points_pl, \
-                self.open_gt_corner_valid_mask_256_64, \
-                self.open_gt_labels_256_64, \
-                self.open_gt_labels_pair,\
-                self.open_gt_type_label = self.MODEL.placeholder_inputs_32(self.BATCH_SIZE)
-
+                self.sample_points_pl, \
+                self.labels_256_64, \
+                self.labels_type, \
+                self.mask_256_64_candidates, \
+                self.mask_1_if_corner,\
+                self.mask_1_if_proposed = self.MODEL.placeholder_inputs_32(self.BATCH_SIZE)
                 self.is_training_32 = tf.compat.v1.placeholder(tf.bool, shape=())
                 
                 self.batch_32 = tf.compat.v1.get_variable('batch', [],initializer=tf.compat.v1.constant_initializer(0), trainable=False)
@@ -94,7 +94,7 @@ class NetworkTrainer:
                 elif self.OPTIMIZER == 'adam':
                     self.optimizer_32 = tf.compat.v1.train.AdamOptimizer(self.learning_rate_32)
 
-                self.MODEL.get_model_32(self.open_gt_corner_pair_sample_points_pl, self.is_training_32, bn_decay=self.bn_decay_32)
+                self.MODEL.get_model_32(self.sample_points_pl, self.is_training_32, bn_decay=self.bn_decay_32)
 
                 tower_grads_stage2 = []
                 pred_seg_p_gpu = []
@@ -108,20 +108,21 @@ class NetworkTrainer:
                     with tf.compat.v1.variable_scope(tf.compat.v1.get_variable_scope(), reuse=True):
                         with tf.device('/gpu:%d'%(i)), tf.compat.v1.name_scope('gpu_%d'%(i)) as scope:
                             device_batch_size_3_2 = self.BATCH_SIZE*256//2
-                            batch_corner_pair_sample_points_pl = tf.slice(self.open_gt_corner_pair_sample_points_pl, [i*device_batch_size_3_2,0,0], [device_batch_size_3_2,-1,-1])
-                            batch_open_gt_256_64_labels = tf.slice(self.open_gt_labels_256_64, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
-                            batch_open_gt_256_64_valid_mask = tf.slice(self.open_gt_corner_valid_mask_256_64, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
-                            batch_open_gt_pair_valid_mask = tf.slice(self.open_gt_labels_pair, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
-                            batch_open_gt_type_label = tf.slice(self.open_gt_type_label, [i*device_batch_size_3_2], [device_batch_size_3_2])
-                            pred_open_curve_seg, pred_open_curve_cls, end_points = self.MODEL.get_model_32(batch_corner_pair_sample_points_pl, self.is_training_32, bn_decay=self.bn_decay_32)
+                            batch_sample_points_pl = tf.slice(self.sample_points_pl, [i*device_batch_size_3_2,0,0], [device_batch_size_3_2,-1,-1])
+                            batch_labels_256_64 = tf.slice(self.labels_256_64, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
+                            batch_mask_256_64_candidates = tf.slice(self.mask_256_64_candidates, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
+                            batch_mask_1_if_corner = tf.slice(self.mask_1_if_corner, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
+                            batch_mask_1_if_proposed = tf.slice(self.mask_1_if_proposed, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
+                            batch_labels_type = tf.slice(self.labels_type, [i*device_batch_size_3_2], [device_batch_size_3_2])
+                            pred_open_curve_seg, pred_open_curve_cls, end_points = self.MODEL.get_model_32(batch_sample_points_pl, self.is_training_32, bn_decay=self.bn_decay_32)
                             
                             loss_32, seg_3_2_loss, cls_3_2_loss = self.MODEL.get_stage_2_loss(pred_open_curve_seg, \
                                                         pred_open_curve_cls, \
-                                                        batch_open_gt_256_64_labels, \
-                                                        batch_open_gt_256_64_valid_mask, \
-                                                        batch_open_gt_pair_valid_mask, \
-                                                        batch_open_gt_type_label,\
-                                                        #pred_open_curve_reg, \
+                                                        batch_labels_256_64, \
+                                                        batch_mask_256_64_candidates, \
+                                                        batch_mask_1_if_corner, \
+                                                        batch_mask_1_if_proposed,\
+                                                        batch_labels_type, \
                                                         #batch_open_gt_res, \
                                                         #batch_open_gt_sample_points, \
                                                         #batch_open_gt_256_64_idx, \
@@ -289,7 +290,7 @@ class NetworkTrainer:
             # load graph_31
             init_31 = tf.compat.v1.global_variables_initializer()
             self.sess_31.run(init_31)
-            self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_2.ckpt')
+            self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_498.ckpt')
             # build train ops
             self.train_ops_31 = {'pointclouds_pl': self.pointclouds_pl,
                                 'labels_edge_p': self.labels_edge_p,
@@ -349,11 +350,12 @@ class NetworkTrainer:
                 self.saver_32.restore(self.sess_32, self.BASE_DIR+'/stage_2_log/model_32_.ckpt')
             
             self.train_ops_32 = {
-                'open_gt_corner_pair_sample_points_pl': self.open_gt_corner_pair_sample_points_pl,
-               'open_gt_corner_valid_mask_256_64': self.open_gt_corner_valid_mask_256_64,
-               'open_gt_labels_256_64': self.open_gt_labels_256_64,
-               'open_gt_labels_pair': self.open_gt_labels_pair,
-               'open_gt_type_label': self.open_gt_type_label,
+               'sample_points_pl': self.sample_points_pl,
+               'mask_256_64_candidates': self.mask_256_64_candidates,
+               'mask_1_if_corner': self.mask_1_if_corner,
+               'mask_1_if_proposed': self.mask_1_if_proposed,
+               'labels_256_64': self.labels_256_64,
+               'labels_type': self.labels_type,
                'pred_open_curve_seg': self.pred_open_curve_seg,
                'pred_open_curve_cls': self.pred_open_curve_cls,
                'end_points': self.end_points,
@@ -447,11 +449,11 @@ class NetworkTrainer:
                 batch_regression_corner = np.zeros((self.BATCH_SIZE,self.NUM_POINT,3),np.float32)
 
                 batch_open_gt_256_64_idx = np.zeros((self.BATCH_SIZE, 256, 64), np.int32)
-                batch_open_gt_mask = np.zeros((self.BATCH_SIZE, 256, 64), np.int32)
+                #batch_open_gt_mask = np.zeros((self.BATCH_SIZE, 256, 64), np.int32)
                 batch_open_gt_type = np.zeros((self.BATCH_SIZE, 256, 1), np.int32)
-                batch_open_gt_res = np.zeros((self.BATCH_SIZE, 256, 6), np.float32)
-                batch_open_gt_sample_points = np.zeros((self.BATCH_SIZE,256, 64, 3), np.float32)
-                batch_open_gt_valid_mask = np.zeros((self.BATCH_SIZE,256, 1), np.int32)
+                #batch_open_gt_res = np.zeros((self.BATCH_SIZE, 256, 6), np.float32)
+                #batch_open_gt_sample_points = np.zeros((self.BATCH_SIZE,256, 64, 3), np.float32)
+                #batch_open_gt_valid_mask = np.zeros((self.BATCH_SIZE,256, 1), np.int32)
                 batch_open_gt_pair_idx = np.zeros((self.BATCH_SIZE,256, 2), np.int32)
 
                 #batch_labels_type = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
@@ -523,35 +525,45 @@ class NetworkTrainer:
                     total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
 
                 # here takes the post processing place.
-                
                 pred_labels_corner_p_val_softmax = ssp.softmax(pred_labels_corner_p_val[begin_idx:end_idx,:,:], axis = 2)
-                corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_idx, corner_valid_mask_pair, corner_valid_mask_256_64, corner_pair_available = self.corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val_softmax)
-                open_gt_labels_256_64, open_gt_labels_pair, open_gt_type = self.corner_pair_label_generator(corner_pair_256_64_idx, \
-                                                                            corner_pair_idx, \
-                                                                            corner_valid_mask_pair, \
-                                                                            corner_pair_available, \
-                                                                            batch_inputs, \
-                                                                            batch_open_gt_pair_idx, \
-                                                                            batch_open_gt_256_64_idx, \
-                                                                            batch_open_gt_type)
-                corner_pair_sample_points = np.concatenate([corner_pair_sample_points[i] for i in range(len(corner_pair_sample_points))], axis = 0) # this will be [N, 64, 3]
-                #corner_pair_sample_points_label = tf.concat([corner_pair_sample_points_label[i] for i in range(len(corner_pair_sample_points_label))], axis = 0)
-                corner_valid_mask_256_64 = np.concatenate([corner_valid_mask_256_64[i] for i in range(len(corner_valid_mask_256_64))], axis = 0) 
-                corner_pair_sample_points = corner_pair_sample_points.astype(np.float32)
-                corner_valid_mask_256_64 = corner_valid_mask_256_64.astype(np.int32)
-                open_gt_labels_pair = open_gt_labels_pair.astype(np.int32)
-                open_gt_labels_256_64 = open_gt_labels_256_64.astype(np.int32)
-                open_gt_type = open_gt_type.astype(np.int32)
+                sample_points_pl, idx_B_256_64, idx_pair, mask_1_if_proposed, mask_256_64_candidates, pairs_available = self.corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val_softmax)
+
+                # open_gt_labels_pair: "it has to be 0 labeled if it is not a corner, although it is proposed."
+                # open_gt_labels_pair_1_if_proposed_anyway: "proposed? ok it is 1 no matter what"
                 #
+                # Note: Masks at loss!
+                # cls - mask_1_if_proposed will let you take only the proposals.
+                # seg - labels_256_64                    will create loss in the first place, 
+                #     - mask_256_64_candidates           will take valid candidates only and
+                #     - mask_1_if_corner                 will take suitable corners only.
+                
+                labels_256_64, mask_1_if_corner, labels_type = self.corner_pair_label_generator(idx_B_256_64, \
+                                                                                                idx_pair, \
+                                                                                                mask_1_if_proposed, \
+                                                                                                pairs_available, \
+                                                                                                batch_inputs, \
+                                                                                                batch_open_gt_pair_idx, \
+                                                                                                batch_open_gt_256_64_idx, \
+                                                                                                batch_open_gt_type)
+                sample_points_pl = np.concatenate([sample_points_pl[i] for i in range(len(sample_points_pl))], axis = 0) # this will be [N, 64, 3]
+                mask_256_64_candidates = np.concatenate([mask_256_64_candidates[i] for i in range(len(mask_256_64_candidates))], axis = 0)
+                mask_1_if_proposed = np.concatenate([mask_1_if_proposed[i] for i in range(len(mask_1_if_proposed))], axis = 0)
+
+                sample_points_pl = sample_points_pl.astype(np.float32)
+                labels_256_64 = labels_256_64.astype(np.int32)
+                labels_type = labels_type.astype(np.int32)
+                mask_256_64_candidates = mask_256_64_candidates.astype(np.int32)
+                mask_1_if_corner = mask_1_if_corner.astype(np.int32)
+                mask_1_if_proposed = mask_1_if_proposed.astype(np.int32)
 
                 with self.graph_32.as_default():
-                    feed_dict = {self.train_ops_32['open_gt_corner_pair_sample_points_pl']: corner_pair_sample_points,\
-                                #ops['corner_pair_sample_points_label']: corner_pair_sample_points_label,\
-                                self.train_ops_32['open_gt_corner_valid_mask_256_64']: corner_valid_mask_256_64, \
-                                self.train_ops_32['open_gt_labels_256_64']: open_gt_labels_256_64, \
-                                self.train_ops_32['open_gt_labels_pair']: open_gt_labels_pair, \
-                                self.train_ops_32['open_gt_type_label']: open_gt_type, \
-                                self.train_ops_32['is_training_32']: is_training_32}
+                    feed_dict = {self.train_ops_32['sample_points_pl']: sample_points_pl,\
+                                 self.train_ops_32['labels_type']: labels_type, \
+                                 self.train_ops_32['labels_256_64']: labels_256_64, \
+                                 self.train_ops_32['mask_256_64_candidates']: mask_256_64_candidates, \
+                                 self.train_ops_32['mask_1_if_corner']: mask_1_if_corner, \
+                                 self.train_ops_32['mask_1_if_proposed']: mask_1_if_proposed, \
+                                 self.train_ops_32['is_training_32']: is_training_32}
                     # session run
                     summary, step, _, \
                     seg_3_2_loss_val, \
@@ -928,20 +940,28 @@ class NetworkTrainer:
         return bn_decay
 
     def corner_pair_neighbor_search(self, points_cloud, pred_corner):
-        """ builds a sphere between two predicted corner points, sample 64 points within the spehere.
+        """ builds a sphere between two predicted corner points, sample 62 points within the spehere.
+        Note: We name this 62 points 'neighbors' + 2 points at the both ends = 64 points
 
         Args:
             points_cloud ([tf.float32], batch_size, 8096, 3): original point cloud
             pred_corner ([tf.float32], batch_size, 8096, 2): predicted corner points
 
         Returns:
-            sampled points, its indices and valid masks
+            points_B_256_64_3: float32, sampled points in the neighborhood, 64 points per corner pair.
+            idx_B_256_64: their indices in points_cloud
+            idx_pair: and their pair indices
+            valid_mask_all_pair (list, (N, 256, 1)): valid mask based on proposed corners. 
+                                                    (Note: elements of valid_mask_all_pair are 1 when they are just "proposed" anyway, not subject to if it is real in gt.)
+            valid_mask_256_64_per_batch (list, (N, 256, 64)): valid mask based on the candidates num.
+                                                            (Note: elements of valid_mask_256_64_per_batch are 1 when they are just "proposed".)
+            pairs_available: list of booleans, whethere at least one pair is available per batch
         """    
         
         
-        corner_pair_available = [False]*self.BATCH_SIZE
-        corner_valid_mask_pair = []
-        corner_pair_idx = []
+        pairs_available = [False]*self.BATCH_SIZE
+        valid_mask_all_pair = []
+        idx_pair = []
         
         for per_batch in range(self.BATCH_SIZE):
             threshold = 0.90
@@ -952,21 +972,21 @@ class NetworkTrainer:
 
             if idx.shape[0] > 1:
                 idx = np.sort(idx)
-                corner_pair_available[per_batch] = True
+                pairs_available[per_batch] = True
                 idx_r = np.repeat(idx, idx.shape[0])
                 idx_b = np.tile(idx, [idx.shape[0]])
                 two_col = np.stack([idx_r, idx_b], 1)
-                corner_pair_idx.append(two_col[two_col[:,0] < two_col[:, 1]])
+                idx_pair.append(two_col[two_col[:,0] < two_col[:, 1]])
             else:
-                corner_pair_idx.append([])
+                idx_pair.append([])
 
         # per batch sample the points
-        corner_pair_256_64_idx = []
-        corner_pair_sample_points = [] # (8, 256, 64, 3)
-        corner_valid_mask_256_64 = []
+        idx_B_256_64 = []
+        points_B_256_64_3 = [] # (8, 256, 64, 3)
+        valid_mask_256_64_per_batch = []
         for per_batch in range(self.BATCH_SIZE):
             rest_num = 256
-            if corner_pair_available[per_batch]:
+            if pairs_available[per_batch]:
 
                 # first increase the precision to float64, 
                 # otherwise it may go wrong when it comes to finding points within radius, 
@@ -974,8 +994,8 @@ class NetworkTrainer:
                 points_cloud = np.float64(points_cloud)
 
                 # find neighbors
-                xyz1 = points_cloud[per_batch, ...][corner_pair_idx[per_batch][:, 0], :]
-                xyz2 = points_cloud[per_batch, ...][corner_pair_idx[per_batch][:, 1], :]
+                xyz1 = points_cloud[per_batch, ...][idx_pair[per_batch][:, 0], :]
+                xyz2 = points_cloud[per_batch, ...][idx_pair[per_batch][:, 1], :]
                 
                 ball_center = np.mean(np.stack([xyz1, xyz2], axis = 0), axis = 0)
                 distance_from_ball_center = np.sqrt(np.sum(((np.expand_dims(ball_center, 1) - np.expand_dims(points_cloud[per_batch],axis=0))**2), axis = 2))
@@ -984,7 +1004,7 @@ class NetworkTrainer:
 
                 # per corner pair within this batch, subsample the indicies
                 idx_256_64 = []
-                valid_mask_256_64 = []
+                valid_mask_256_64_per_corner = []
                 corner_pair_num = within_range.shape[0]
                 
                 # if there are more than 256 pairs, just take first 256.
@@ -993,8 +1013,8 @@ class NetworkTrainer:
 
                 for per_corner in range(corner_pair_num):
                     # make sure that corner points(end points) are not within the range.
-                    assert within_range[per_corner, ...][corner_pair_idx[per_batch][per_corner]][0] == False
-                    assert within_range[per_corner, ...][corner_pair_idx[per_batch][per_corner]][1] == False
+                    assert within_range[per_corner, ...][idx_pair[per_batch][per_corner]][0] == False
+                    assert within_range[per_corner, ...][idx_pair[per_batch][per_corner]][1] == False
                     #assert tf.gather(within_range[per_corner, :], corner_pair_idx[per_batch][per_corner])[0] == tf.constant([False])
                     #assert tf.gather(within_range[per_corner, :], corner_pair_idx[per_batch][per_corner])[1] == tf.constant([False])
                     candidnate_num = np.where(within_range[per_corner, :])[0].shape[0]
@@ -1004,9 +1024,9 @@ class NetworkTrainer:
                     if 63 <= candidnate_num:
                         middle_indicies = np.where(within_range[per_corner, :])[0]
                         np.random.shuffle(middle_indicies)
-                        idx_nums = np.concatenate([np.expand_dims(corner_pair_idx[per_batch][per_corner][0], axis = 0), np.squeeze(middle_indicies[:62]), np.expand_dims(corner_pair_idx[per_batch][per_corner][-1], axis = 0)], axis = 0)
+                        idx_nums = np.concatenate([np.expand_dims(idx_pair[per_batch][per_corner][0], axis = 0), np.squeeze(middle_indicies[:62]), np.expand_dims(idx_pair[per_batch][per_corner][-1], axis = 0)], axis = 0)
                         idx_256_64.append(np.expand_dims(idx_nums, axis = 0))
-                        valid_mask_256_64.append(np.expand_dims(np.ones_like(idx_nums), axis = 0))
+                        valid_mask_256_64_per_corner.append(np.expand_dims(np.ones_like(idx_nums), axis = 0))
 
                     elif 0 < candidnate_num < 63:
                         n = candidnate_num
@@ -1014,31 +1034,31 @@ class NetworkTrainer:
                         middle_indicies = np.where(within_range[per_corner, :])[0]
                         #if candidnate_num == 1: 
                             #middle_indicies = np.expand_dims(middle_indicies, axis = 0)
-                        idx_nums = np.concatenate([np.expand_dims(corner_pair_idx[per_batch][per_corner][0], axis = 0), middle_indicies, np.repeat(corner_pair_idx[per_batch][per_corner][-1], dummy_num)], axis = 0)
+                        idx_nums = np.concatenate([np.expand_dims(idx_pair[per_batch][per_corner][0], axis = 0), middle_indicies, np.repeat(idx_pair[per_batch][per_corner][-1], dummy_num)], axis = 0)
                         idx_256_64.append(np.expand_dims(idx_nums, axis = 0))
-                        valid_mask_256_64.append(np.expand_dims(np.concatenate([np.ones((64 - (dummy_num - 1)), dtype = np.int64), np.zeros((dummy_num - 1), dtype = np.int64)], axis = 0), axis = 0))
+                        valid_mask_256_64_per_corner.append(np.expand_dims(np.concatenate([np.ones((64 - (dummy_num - 1)), dtype = np.int64), np.zeros((dummy_num - 1), dtype = np.int64)], axis = 0), axis = 0))
                     
                     elif candidnate_num == 0:
                         dummy_num = 63
-                        idx_nums = np.concatenate([np.expand_dims(corner_pair_idx[per_batch][per_corner][0], axis = 0), np.repeat(corner_pair_idx[per_batch][per_corner][-1], dummy_num)], axis = 0)
+                        idx_nums = np.concatenate([np.expand_dims(idx_pair[per_batch][per_corner][0], axis = 0), np.repeat(idx_pair[per_batch][per_corner][-1], dummy_num)], axis = 0)
                         idx_256_64.append(np.expand_dims(idx_nums, axis = 0))
-                        valid_mask_256_64.append(np.expand_dims(np.concatenate([np.ones((64 - (dummy_num - 1)), dtype = np.int64), np.zeros((dummy_num - 1), dtype = np.int64)], axis = 0), axis = 0))
+                        valid_mask_256_64_per_corner.append(np.expand_dims(np.concatenate([np.ones((64 - (dummy_num - 1)), dtype = np.int64), np.zeros((dummy_num - 1), dtype = np.int64)], axis = 0), axis = 0))
                 if rest_num > 0: 
                     idx_256_64.append(np.zeros((rest_num, 64), dtype = np.int64))
-                    valid_mask_256_64.append(np.zeros((rest_num, 64), dtype = np.int64))
-                corner_pair_256_64_idx.append(np.concatenate(idx_256_64, axis = 0))
-                corner_valid_mask_256_64.append(np.concatenate(valid_mask_256_64, axis = 0))
-                corner_pair_sample_points.append(points_cloud[per_batch][corner_pair_256_64_idx[per_batch], ...])
+                    valid_mask_256_64_per_corner.append(np.zeros((rest_num, 64), dtype = np.int64))
+                idx_B_256_64.append(np.concatenate(idx_256_64, axis = 0))
+                valid_mask_256_64_per_batch.append(np.concatenate(valid_mask_256_64_per_corner, axis = 0))
+                points_B_256_64_3.append(points_cloud[per_batch][idx_B_256_64[per_batch], ...])
             else:
-                corner_pair_256_64_idx.append(np.zeros((rest_num, 64), dtype = np.int64))
-                corner_valid_mask_256_64.append(np.zeros((rest_num, 64), dtype = np.int64))
-                corner_pair_sample_points.append(np.zeros((rest_num, 64, 3), dtype = np.float32))
+                idx_B_256_64.append(np.zeros((rest_num, 64), dtype = np.int64))
+                valid_mask_256_64_per_batch.append(np.zeros((rest_num, 64), dtype = np.int64))
+                points_B_256_64_3.append(np.zeros((rest_num, 64, 3), dtype = np.float32))
             valid_mask = np.ones(256, dtype = np.int8)
             valid_mask[-rest_num:] = 0
             valid_mask = np.expand_dims(valid_mask, axis = 1)
-            corner_valid_mask_pair.append(valid_mask)
+            valid_mask_all_pair.append(valid_mask)
 
-        return corner_pair_sample_points, corner_pair_256_64_idx, corner_pair_idx, corner_valid_mask_pair, corner_valid_mask_256_64, corner_pair_available
+        return points_B_256_64_3, idx_B_256_64, idx_pair, valid_mask_all_pair, valid_mask_256_64_per_batch, pairs_available
 
     def corner_pair_label_generator(self, \
                                     sample_256_64_idx, \
