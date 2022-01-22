@@ -8,8 +8,20 @@ import numpy as np
 import tf_util
 from pointnet_util import pointnet_sa_module, pointnet_fp_module
 from transform_nets import input_transform_net, feature_transform_net
-import tensorflow_graphics as tfg
+#import tensorflow_graphics as tfg
 
+
+# Chamfer Distance: float32!
+Chamfer_Distance_func = lambda x: tf.reduce_min(tf.sqrt(tf.reduce_sum((tf.expand_dims(x[0], axis = 1) - tf.expand_dims(x[1], axis = 0))**2, axis = 2)), axis = 1)
+Chamfer_Distance = tf.map_fn(fn = Chamfer_Distance_func, elems = (aa, bb), dtype = tf.float64, back_prop=True)
+tf.reduce_sum(tf.reduce_sum(Chamfer_Dstance*mask_256_64*(Nn/Np)+1, axis = 1)*mask_if_corner)
+
+LL = tf.stack([ll, ll])	
+# Param_Line_Func (We ignore Batch Dimensions. x[0] = x[ignored, 0, ...])
+Param_Line_Func = lambda x: tf.concat([tf.expand_dims(ll[0], axis = 0), x[0]+(x[1]-x[0])*tf.random.uniform(shape=(62,1), minval=0, maxval=1, dtype=tf.dtypes.float32, seed=None, name=None), tf.expand_dims(x[1], axis = 0)], axis =0)
+tf.map_fn(fn = Param_Line_Func, elems = LL, dtype = tf.float32, back_prop = True)
+
+# Chamfer Distance Implementation from: https://stackoverflow.com/questions/47060685/chamfer-distance-between-two-point-clouds-in-tensorflow/54767428
 def distance_matrix(array1, array2):
     """
     arguments: 
