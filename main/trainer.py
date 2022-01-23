@@ -76,6 +76,7 @@ class NetworkTrainer:
                 self.sample_points_pl, \
                 self.labels_256_64, \
                 self.labels_type, \
+                self.labels_type_one_hot, \
                 self.mask_256_64_candidates, \
                 self.mask_1_if_corner,\
                 self.mask_1_if_proposed = self.MODEL.placeholder_inputs_32(self.BATCH_SIZE)
@@ -99,8 +100,11 @@ class NetworkTrainer:
                 tower_grads_stage2 = []
                 pred_seg_p_gpu = []
                 pred_cls_p_gpu = []
+                pred_reg_p_gpu = []
                 seg_3_2_loss_p_gpu = []
                 cls_3_2_loss_p_gpu = []
+                reg_3_2_loss_p_gpu = []
+                mat_diff_3_2_loss_p_gpu = []
                 total_loss_gpu = []
                 end_points_p_gpu = []
 
@@ -114,15 +118,19 @@ class NetworkTrainer:
                             batch_mask_1_if_corner = tf.slice(self.mask_1_if_corner, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
                             batch_mask_1_if_proposed = tf.slice(self.mask_1_if_proposed, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
                             batch_labels_type = tf.slice(self.labels_type, [i*device_batch_size_3_2], [device_batch_size_3_2])
-                            pred_open_curve_seg, pred_open_curve_cls, end_points = self.MODEL.get_model_32(batch_sample_points_pl, self.is_training_32, bn_decay=self.bn_decay_32)
+                            batch_labels_type_one_hot = tf.slice(self.labels_type_one_hot, [i*device_batch_size_3_2, 0], [device_batch_size_3_2, -1])
+                            pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = self.MODEL.get_model_32(batch_sample_points_pl, self.is_training_32, bn_decay=self.bn_decay_32)
                             
-                            loss_32, seg_3_2_loss, cls_3_2_loss = self.MODEL.get_stage_2_loss(pred_open_curve_seg, \
+                            loss_32, seg_3_2_loss, cls_3_2_loss, reg_3_2_loss, mat_diff_loss = self.MODEL.get_stage_2_loss(pred_open_curve_seg, \
                                                         pred_open_curve_cls, \
+                                                        pred_open_curve_reg, \
                                                         batch_labels_256_64, \
                                                         batch_mask_256_64_candidates, \
                                                         batch_mask_1_if_corner, \
                                                         batch_mask_1_if_proposed,\
                                                         batch_labels_type, \
+                                                        batch_labels_type_one_hot, \
+                                                        batch_sample_points_pl, \
                                                         #batch_open_gt_res, \
                                                         #batch_open_gt_sample_points, \
                                                         #batch_open_gt_256_64_idx, \
@@ -138,20 +146,26 @@ class NetworkTrainer:
                             tower_grads_stage2.append(grads)
                             pred_seg_p_gpu.append(pred_open_curve_seg)
                             pred_cls_p_gpu.append(pred_open_curve_cls)
+                            pred_reg_p_gpu.append(pred_open_curve_reg)
                             end_points_p_gpu.append(end_points)
                             
                             #pred_reg_p_gpu.append(pred_open_curve_reg)
                             total_loss_gpu.append(loss_32)
                             seg_3_2_loss_p_gpu.append(seg_3_2_loss)
                             cls_3_2_loss_p_gpu.append(cls_3_2_loss)
+                            reg_3_2_loss_p_gpu.append(reg_3_2_loss)
+                            mat_diff_3_2_loss_p_gpu.append(mat_diff_loss)
 
                 # average or concat
                 self.pred_open_curve_seg = tf.concat(pred_seg_p_gpu, 0)
                 self.pred_open_curve_cls = tf.concat(pred_cls_p_gpu, 0)
+                self.pred_open_curve_reg = tf.concat(pred_reg_p_gpu, 0)
                 self.end_points = end_points_p_gpu
                 self.total_loss_32 = tf.reduce_mean(input_tensor = total_loss_gpu)
                 self.seg_3_2_loss = tf.reduce_mean(input_tensor = seg_3_2_loss_p_gpu)
                 self.cls_3_2_loss = tf.reduce_mean(input_tensor = cls_3_2_loss_p_gpu)
+                self.reg_3_2_loss = tf.reduce_mean(input_tensor = reg_3_2_loss_p_gpu)
+                self.mat_diff_loss = tf.reduce_mean(input_tensor = mat_diff_loss)
 
                 # Get training operator
                 grads = self.average_gradients(tower_grads_stage2)
@@ -356,12 +370,16 @@ class NetworkTrainer:
                'mask_1_if_proposed': self.mask_1_if_proposed,
                'labels_256_64': self.labels_256_64,
                'labels_type': self.labels_type,
+               'labels_type_one_hot': self.labels_type_one_hot,
                'pred_open_curve_seg': self.pred_open_curve_seg,
                'pred_open_curve_cls': self.pred_open_curve_cls,
+               'pred_open_curve_reg': self.pred_open_curve_reg,
                'end_points': self.end_points,
                'is_training_32': self.is_training_32,
                'total_seg_loss_32': self.seg_3_2_loss,
                'total_cls_loss_32': self.cls_3_2_loss,
+               'total_reg_loss_32': self.reg_3_2_loss,
+               'total_mat_diff_loss_32': self.mat_diff_loss,
                'total_loss_32': self.total_loss_32,
                'train_op': self.train_optimizer_32,
                'merged': self.merged_32,
@@ -421,7 +439,8 @@ class NetworkTrainer:
             total_loss_3_2 = 0.0
             total_seg_3_2_loss = 0.0
             total_cls_3_2_loss = 0.0
-            #total_reg_3_2_loss = 0.0
+            total_reg_3_2_loss = 0.0
+            total_mat_diff_3_2_loss = 0.0
     #        total_task_2_2_loss = 0.0
     #        total_task_3_loss = 0.0
     #        total_task_4_loss = 0.0
@@ -435,6 +454,7 @@ class NetworkTrainer:
             pred_reg_corner_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
             pred_open_curve_seg = np.zeros((num_data*256, 64, 2), np.float32)
             pred_open_curve_cls = np.zeros((num_data*256, 4), np.float32)
+            pred_open_curve_reg = np.zeros((num_data*256, 6), np.float32)
             np.random.shuffle(train_data)
             for j in range(num_batch):
                 # remember that num_batch will be 8
@@ -451,6 +471,7 @@ class NetworkTrainer:
                 batch_open_gt_256_64_idx = np.zeros((self.BATCH_SIZE, 256, 64), np.int32)
                 #batch_open_gt_mask = np.zeros((self.BATCH_SIZE, 256, 64), np.int32)
                 batch_open_gt_type = np.zeros((self.BATCH_SIZE, 256, 1), np.int32)
+                batch_open_gt_type_one_hot = np.zeros((self.BATCH_SIZE, 256, 4), np.int32)
                 #batch_open_gt_res = np.zeros((self.BATCH_SIZE, 256, 6), np.float32)
                 #batch_open_gt_sample_points = np.zeros((self.BATCH_SIZE,256, 64, 3), np.float32)
                 #batch_open_gt_valid_mask = np.zeros((self.BATCH_SIZE,256, 1), np.int32)
@@ -477,6 +498,7 @@ class NetworkTrainer:
                     #batch_open_gt_res[cnt, ...] = tmp_data[0, 0]['open_gt_res']
                     #batch_open_gt_valid_mask[cnt, ...] = tmp_data[0, 0]['open_gt_valid_mask']
                     batch_open_gt_pair_idx[cnt, ...] = tmp_data[0, 0]['open_gt_pair_idx']
+                    batch_open_gt_type_one_hot[cnt, ...] = tmp_data[0, 0]['open_type_onehot']
 
                     #batch_labels_type[cnt,:] = np.squeeze(tmp_data['motion_dof_type'][0,0])
                     #tmp_simmat = tmp_data['similar_matrix'][0,0]
@@ -537,14 +559,15 @@ class NetworkTrainer:
                 #     - mask_256_64_candidates           will take valid candidates only and
                 #     - mask_1_if_corner                 will take suitable corners only.
                 
-                labels_256_64, mask_1_if_corner, labels_type = self.corner_pair_label_generator(idx_B_256_64, \
-                                                                                                idx_pair, \
-                                                                                                mask_1_if_proposed, \
-                                                                                                pairs_available, \
-                                                                                                batch_inputs, \
-                                                                                                batch_open_gt_pair_idx, \
-                                                                                                batch_open_gt_256_64_idx, \
-                                                                                                batch_open_gt_type)
+                labels_256_64, mask_1_if_corner, labels_type, labels_type_one_hot = self.corner_pair_label_generator(idx_B_256_64, \
+                                                                                                                    idx_pair, \
+                                                                                                                    mask_1_if_proposed, \
+                                                                                                                    pairs_available, \
+                                                                                                                    batch_inputs, \
+                                                                                                                    batch_open_gt_pair_idx, \
+                                                                                                                    batch_open_gt_256_64_idx, \
+                                                                                                                    batch_open_gt_type, \
+                                                                                                                    batch_open_gt_type_one_hot)
                 sample_points_pl = np.concatenate([sample_points_pl[i] for i in range(len(sample_points_pl))], axis = 0) # this will be [N, 64, 3]
                 mask_256_64_candidates = np.concatenate([mask_256_64_candidates[i] for i in range(len(mask_256_64_candidates))], axis = 0)
                 mask_1_if_proposed = np.concatenate([mask_1_if_proposed[i] for i in range(len(mask_1_if_proposed))], axis = 0)
@@ -552,6 +575,7 @@ class NetworkTrainer:
                 sample_points_pl = sample_points_pl.astype(np.float32)
                 labels_256_64 = labels_256_64.astype(np.int32)
                 labels_type = labels_type.astype(np.int32)
+                labels_type_one_hot = labels_type_one_hot.astype(np.int32)
                 mask_256_64_candidates = mask_256_64_candidates.astype(np.int32)
                 mask_1_if_corner = mask_1_if_corner.astype(np.int32)
                 mask_1_if_proposed = mask_1_if_proposed.astype(np.int32)
@@ -560,6 +584,7 @@ class NetworkTrainer:
                     feed_dict = {self.train_ops_32['sample_points_pl']: sample_points_pl,\
                                  self.train_ops_32['labels_type']: labels_type, \
                                  self.train_ops_32['labels_256_64']: labels_256_64, \
+                                 self.train_ops_32['labels_type_one_hot']: labels_type_one_hot, \
                                  self.train_ops_32['mask_256_64_candidates']: mask_256_64_candidates, \
                                  self.train_ops_32['mask_1_if_corner']: mask_1_if_corner, \
                                  self.train_ops_32['mask_1_if_proposed']: mask_1_if_proposed, \
@@ -568,23 +593,29 @@ class NetworkTrainer:
                     summary, step, _, \
                     seg_3_2_loss_val, \
                     cls_3_2_loss_val, \
+                    reg_3_2_loss_val, \
+                    mat_diff_3_2_loss_val, \
                     loss_3_2_val, \
                     pred_open_curve_seg[begin_idx*256:end_idx*256, ...], \
                     pred_open_curve_cls[begin_idx*256:end_idx*256, ...], \
-                    end_points = \
-                        self.sess_32.run([self.train_ops_32['merged'], \
-                                          self.train_ops_32['step'], \
-                                          self.train_ops_32['train_op'], \
-                                          self.train_ops_32['total_seg_loss_32'], \
-                                          self.train_ops_32['total_cls_loss_32'], \
-                                          self.train_ops_32['total_loss_32'], \
-                                          self.train_ops_32['pred_open_curve_seg'], \
-                                          self.train_ops_32['pred_open_curve_cls'], \
-                                          self.train_ops_32['end_points']
-                                         ],feed_dict=feed_dict)
+                    pred_open_curve_reg[begin_idx*256:end_idx*256, ...], \
+                    = self.sess_32.run([self.train_ops_32['merged'], \
+                                        self.train_ops_32['step'], \
+                                        self.train_ops_32['train_op'], \
+                                        self.train_ops_32['total_seg_loss_32'], \
+                                        self.train_ops_32['total_cls_loss_32'], \
+                                        self.train_ops_32['total_reg_loss_32'], \
+                                        self.train_ops_32['total_mat_diff_loss_32'], \
+                                        self.train_ops_32['total_loss_32'], \
+                                        self.train_ops_32['pred_open_curve_seg'], \
+                                        self.train_ops_32['pred_open_curve_cls'], \
+                                        self.train_ops_32['pred_open_curve_reg'], \
+                                        ],feed_dict=feed_dict)
                     # loss
                     total_seg_3_2_loss += seg_3_2_loss_val
                     total_cls_3_2_loss += cls_3_2_loss_val
+                    total_reg_3_2_loss += reg_3_2_loss_val
+                    total_mat_diff_3_2_loss += mat_diff_3_2_loss_val
                     total_loss_3_2 += loss_3_2_val
                 
 
@@ -602,6 +633,9 @@ class NetworkTrainer:
             total_loss_3_2 = total_loss_3_2 * 1.0 / num_batch
             total_cls_3_2_loss = total_cls_3_2_loss * 1.0 / num_batch
             total_seg_3_2_loss = total_seg_3_2_loss * 1.0 / num_batch
+            total_reg_3_2_loss = total_reg_3_2_loss * 1.0 / num_batch
+            total_mat_diff_3_2_loss = total_mat_diff_3_2_loss * 1.0 / num_batch
+
             
                 
             process_duration = time.time() - process_start_time
@@ -622,6 +656,9 @@ class NetworkTrainer:
             self.log_string('\t\tTraining Total_3_2 Mean_Loss: %f' % total_loss_3_2)
             self.log_string('\t\tTraining Seg_3_2 Mean_Loss: %f' % total_seg_3_2_loss)
             self.log_string('\t\tTraining Cls_3_2 Mean_Loss: %f' % total_cls_3_2_loss)
+            self.log_string('\t\tTraining Reg_3_2 Mean_Loss: %f' % total_reg_3_2_loss)
+            self.log_string('\t\tTraining Mat_Diff_3_2 Mean_Loss: %f' % total_mat_diff_3_2_loss)
+            
             
 
     def train_graph_31(self):
@@ -1068,15 +1105,18 @@ class NetworkTrainer:
                                     points_cloud, \
                                     batch_open_gt_pair_idx, \
                                     batch_open_gt_256_64_idx, \
-                                    batch_open_gt_type):
+                                    batch_open_gt_type, \
+                                    batch_open_gt_type_one_hot):
                                 # add more gt_*
 
         batch_num = len(sample_corner_pairs_available)    
         sample_valid_mask_256_64_labels_for_loss = np.zeros((batch_num, 256, 64), dtype = np.int32) # output should be (batch_num, 256, 64, 2)
         sample_valid_mask_pair_labels_for_loss = np.zeros((batch_num, 256, 1), dtype = np.int16)
         sample_corner_type = np.zeros((batch_num, 256), dtype = np.int16)
+        sample_corner_type_one_hot = np.zeros((batch_num, 256, 4), dtype = np.int16)
         points_cloud_np = points_cloud
-        dist_threshold = 0.5
+        dist_threshold = 1
+        n_values = 4
 
         # sample_valid_mask_256_64
         for i in range(batch_num):
@@ -1095,6 +1135,8 @@ class NetworkTrainer:
                         # gt_idx = np.where(batch_open_gt_pair_idx[i][k].numpy() in my_mat['open_gt_pair_idx'][0, 0])[0][0]
                         # my_mat[0, 0]['open_gt_256_64_idx'][gt_idx, :]
                         sample_corner_type[i, k] = batch_open_gt_type[i, gt_idx][0]
+                        # one-hot encoding
+                        sample_corner_type_one_hot[i, k, ...] = np.eye(n_values, dtype = np.int16)[batch_open_gt_type[i, gt_idx][0]]
                         
 
                         mask = np.in1d(sample_256_64_idx[i][k], batch_open_gt_256_64_idx[i, :, :][gt_idx])
@@ -1105,6 +1147,7 @@ class NetworkTrainer:
                     elif (np.flip(sample_pair_idx[i][k]) == batch_open_gt_pair_idx[i, :, :]).all(axis = 1).any():
                         gt_idx = np.where((np.flip(sample_pair_idx[i][k]) == batch_open_gt_pair_idx[i, :, :]).all(axis = 1))[0]
                         sample_corner_type[i, k] = batch_open_gt_type[i, gt_idx][0]
+                        sample_corner_type_one_hot[i, k, ...] = np.eye(n_values, dtype = np.int16)[batch_open_gt_type[i, gt_idx][0]]
                         # my_mat[0, 0]['open_gt_256_64_idx'][gt_idx, :]
                         mask = np.in1d(sample_256_64_idx[i][k], batch_open_gt_256_64_idx[i, :, :][gt_idx])
                         # update here labels
@@ -1120,6 +1163,20 @@ class NetworkTrainer:
                         gt_indices = np.where((distance < np.array([dist_threshold, dist_threshold])).all(axis = 1))[0]
                         gt_idx = gt_indices[np.argmin(distance[gt_indices, :].mean(axis = 1))]
                         sample_corner_type[i, k] = batch_open_gt_type[i, gt_idx][0]
+                        sample_corner_type_one_hot[i, k, ...] = np.eye(n_values, dtype = np.int16)[batch_open_gt_type[i, gt_idx][0]]
+                        mask = np.in1d(sample_256_64_idx[i][k], batch_open_gt_256_64_idx[i, :, :][gt_idx])
+                        mask[0], mask[-1] = True, True
+                        sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
+                        sample_valid_mask_pair_labels_for_loss[i, k, 0] = 1
+                        k = k+1
+                        continue
+
+                    distance = np.sqrt(np.sum((points_cloud_np[i][np.flip(sample_pair_idx[i][k]), :] - points_cloud_np[i][batch_open_gt_pair_idx[i, :, :], :])**2, axis = 2))
+                    if (distance < np.array([dist_threshold, dist_threshold])).all(axis = 1).sum() > 0:
+                        gt_indices = np.where((distance < np.array([dist_threshold, dist_threshold])).all(axis = 1))[0]
+                        gt_idx = gt_indices[np.argmin(distance[gt_indices, :].mean(axis = 1))]
+                        sample_corner_type[i, k] = batch_open_gt_type[i, gt_idx][0]
+                        sample_corner_type_one_hot[i, k, ...] = np.eye(n_values, dtype = np.int16)[batch_open_gt_type[i, gt_idx][0]]
                         mask = np.in1d(sample_256_64_idx[i][k], batch_open_gt_256_64_idx[i, :, :][gt_idx])
                         mask[0], mask[-1] = True, True
                         sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
@@ -1127,18 +1184,9 @@ class NetworkTrainer:
                         k = k+1
                         continue
                     
-
-                    distance = np.sqrt(np.sum((points_cloud_np[i][np.flip(sample_pair_idx[i][k]), :] - points_cloud_np[i][batch_open_gt_pair_idx[i, :, :], :])**2, axis = 2))
-                    if (distance < np.array([dist_threshold, dist_threshold])).all(axis = 1).sum() > 0:
-                        gt_indices = np.where((distance < np.array([dist_threshold, dist_threshold])).all(axis = 1))[0]
-                        gt_idx = gt_indices[np.argmin(distance[gt_indices, :].mean(axis = 1))]
-                        sample_corner_type[i, k] = batch_open_gt_type[i, gt_idx][0]
-                        mask = np.in1d(sample_256_64_idx[i][k], batch_open_gt_256_64_idx[i, :, :][gt_idx])
-                        mask[0], mask[-1] = True, True
-                        sample_valid_mask_256_64_labels_for_loss[i, k, :] = mask.astype(np.int32)
-                        sample_valid_mask_pair_labels_for_loss[i, k, 0] = 1
-                        k = k+1
-                        continue
+                    # Null class
+                    assert batch_open_gt_type[i, gt_idx][0] == 0
+                    sample_corner_type_one_hot[i, k, ...] = np.eye(n_values, dtype = np.int16)[batch_open_gt_type[i, gt_idx][0]]
                     k = k+1
         
-        return sample_valid_mask_256_64_labels_for_loss.reshape((-1, 64)), sample_valid_mask_pair_labels_for_loss.reshape(-1, 1), sample_corner_type.reshape(-1)
+        return sample_valid_mask_256_64_labels_for_loss.reshape((-1, 64)), sample_valid_mask_pair_labels_for_loss.reshape(-1, 1), sample_corner_type.reshape(-1), sample_corner_type_one_hot.reshape(-1, 4)
