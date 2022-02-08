@@ -13,7 +13,7 @@ import sys
 import time
 import fnmatch
 from trainer import NetworkTrainer
-os.environ['CUDA_VISIBLE_DEVICES']= '1,2'
+os.environ['CUDA_VISIBLE_DEVICES']='1,2'
 
 from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,6 +31,7 @@ parser.add_argument('--num_gpus', type=int, default=4, help='How many gpus to us
 parser.add_argument('--model', default='model_all', help='Model name [default: model]')
 parser.add_argument('--stage_1_log_dir', default='stage_1_log', help='Log dir [default: log]')
 parser.add_argument('--stage_2_log_dir', default='stage_2_log', help='Log dir [default: log]')
+parser.add_argument('--stage_3_log_dir', default='stage_3_log', help='Log dir [default: log]')
 parser.add_argument('--num_point', type=int, default=8096, help='Point Number [default: 2048]')
 parser.add_argument('--max_epoch', type=int, default=500, help='Epoch to run [default: 251]')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch Size during training [default: 32]')
@@ -54,4 +55,7 @@ if __name__ == "__main__":
     elif Trainer.STAGE == 2:
         Trainer.build_graph_32()
         Trainer.train_graph_32()
+    elif Trainer.STAGE == 3:
+        Trainer.build_graph_32()
+        Trainer.eval_graph_32()
     Trainer.LOG_FOUT.close()

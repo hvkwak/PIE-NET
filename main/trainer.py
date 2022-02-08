@@ -50,15 +50,17 @@ class NetworkTrainer:
         self.MODEL = importlib.import_module(FLAGS.model) # import network module
         self.MODEL_FILE = os.path.join(ROOT_DIR, 'models', FLAGS.model+'.py')
         if self.STAGE == 1:
-            self.LOG_DIR = FLAGS.stage_1_log_dir
+            self.LOG_DIR = os.path.join(self.BASE_DIR, FLAGS.stage_1_log_dir)
         elif self.STAGE == 2:
-            self.LOG_DIR = FLAGS.stage_2_log_dir
+            self.LOG_DIR = os.path.join(self.BASE_DIR, FLAGS.stage_2_log_dir)
+        elif self.STAGE == 3:
+            self.LOG_DIR = os.path.join(self.BASE_DIR, FLAGS.stage_3_log_dir)
 
         if not os.path.exists(self.LOG_DIR): 
             os.mkdir(self.LOG_DIR)
             os.system('cp %s %s' % (self.MODEL_FILE, self.LOG_DIR)) # bkp of model def
             os.system('cp main_oop.py %s' % (ROOT_DIR+"/"+self.LOG_DIR)) # bkp of train procedure
-        self.LOG_FOUT = open(os.path.join(self.LOG_DIR, 'log_train.txt'), 'w')
+        self.LOG_FOUT = open(os.path.join(self.LOG_DIR, 'log.txt'), 'w')
         self.LOG_FOUT.write(str(FLAGS)+'\n')
 
         self.BN_INIT_DECAY = 0.5
@@ -74,11 +76,11 @@ class NetworkTrainer:
         with self.graph_32.as_default():
             with tf.device('/cpu:0'):
                 self.sample_points_pl, \
-                self.labels_256_64, \
+                self.labels_256_64_edge, \
                 self.labels_type, \
                 self.labels_type_one_hot, \
-                self.mask_256_64_candidates, \
-                self.mask_1_if_corner,\
+                self.mask_256_64_candidates_proposed, \
+                self.mask_1_if_edge,\
                 self.mask_1_if_proposed = self.MODEL.placeholder_inputs_32(self.BATCH_SIZE)
                 self.is_training_32 = tf.compat.v1.placeholder(tf.bool, shape=())
                 
@@ -100,7 +102,8 @@ class NetworkTrainer:
                 tower_grads_stage2 = []
                 pred_seg_p_gpu = []
                 pred_cls_p_gpu = []
-                pred_reg_p_gpu = []
+                pred_reg_Line_p_gpu = []
+                pred_reg_BSpline_p_gpu = []
                 seg_3_2_loss_p_gpu = []
                 cls_3_2_loss_p_gpu = []
                 reg_3_2_loss_p_gpu = []
@@ -111,22 +114,23 @@ class NetworkTrainer:
                 for i in range(self.NUM_GPUS):
                     with tf.compat.v1.variable_scope(tf.compat.v1.get_variable_scope(), reuse=True):
                         with tf.device('/gpu:%d'%(i)), tf.compat.v1.name_scope('gpu_%d'%(i)) as scope:
-                            device_batch_size_3_2 = self.BATCH_SIZE*256//2
+                            device_batch_size_3_2 = self.BATCH_SIZE*256//self.NUM_GPUS
                             batch_sample_points_pl = tf.slice(self.sample_points_pl, [i*device_batch_size_3_2,0,0], [device_batch_size_3_2,-1,-1])
-                            batch_labels_256_64 = tf.slice(self.labels_256_64, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
-                            batch_mask_256_64_candidates = tf.slice(self.mask_256_64_candidates, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
-                            batch_mask_1_if_corner = tf.slice(self.mask_1_if_corner, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
+                            batch_labels_256_64_edge = tf.slice(self.labels_256_64_edge, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
+                            batch_mask_256_64_candidates_proposed = tf.slice(self.mask_256_64_candidates_proposed, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
+                            batch_mask_1_if_edge = tf.slice(self.mask_1_if_edge, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
                             batch_mask_1_if_proposed = tf.slice(self.mask_1_if_proposed, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
                             batch_labels_type = tf.slice(self.labels_type, [i*device_batch_size_3_2], [device_batch_size_3_2])
                             batch_labels_type_one_hot = tf.slice(self.labels_type_one_hot, [i*device_batch_size_3_2, 0], [device_batch_size_3_2, -1])
-                            pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points = self.MODEL.get_model_32(batch_sample_points_pl, self.is_training_32, bn_decay=self.bn_decay_32)
+                            pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg_Line, pred_open_curve_reg_BSpline, end_points = self.MODEL.get_model_32(batch_sample_points_pl, self.is_training_32, bn_decay=self.bn_decay_32)
                             
                             loss_32, seg_3_2_loss, cls_3_2_loss, reg_3_2_loss, mat_diff_loss = self.MODEL.get_stage_2_loss(pred_open_curve_seg, \
                                                         pred_open_curve_cls, \
-                                                        pred_open_curve_reg, \
-                                                        batch_labels_256_64, \
-                                                        batch_mask_256_64_candidates, \
-                                                        batch_mask_1_if_corner, \
+                                                        pred_open_curve_reg_Line, \
+                                                        pred_open_curve_reg_BSpline, \
+                                                        batch_labels_256_64_edge, \
+                                                        batch_mask_256_64_candidates_proposed, \
+                                                        batch_mask_1_if_edge, \
                                                         batch_mask_1_if_proposed,\
                                                         batch_labels_type, \
                                                         batch_labels_type_one_hot, \
@@ -146,7 +150,8 @@ class NetworkTrainer:
                             tower_grads_stage2.append(grads)
                             pred_seg_p_gpu.append(pred_open_curve_seg)
                             pred_cls_p_gpu.append(pred_open_curve_cls)
-                            pred_reg_p_gpu.append(pred_open_curve_reg)
+                            pred_reg_Line_p_gpu.append(pred_open_curve_reg_Line)
+                            pred_reg_BSpline_p_gpu.append(pred_open_curve_reg_BSpline)
                             end_points_p_gpu.append(end_points)
                             
                             #pred_reg_p_gpu.append(pred_open_curve_reg)
@@ -159,7 +164,8 @@ class NetworkTrainer:
                 # average or concat
                 self.pred_open_curve_seg = tf.concat(pred_seg_p_gpu, 0)
                 self.pred_open_curve_cls = tf.concat(pred_cls_p_gpu, 0)
-                self.pred_open_curve_reg = tf.concat(pred_reg_p_gpu, 0)
+                self.pred_open_curve_reg_Line = tf.concat(pred_reg_Line_p_gpu, 0)
+                self.pred_open_curve_reg_BSpline = tf.concat(pred_reg_BSpline_p_gpu, 0)
                 self.end_points = end_points_p_gpu
                 self.total_loss_32 = tf.reduce_mean(input_tensor = total_loss_gpu)
                 self.seg_3_2_loss = tf.reduce_mean(input_tensor = seg_3_2_loss_p_gpu)
@@ -289,6 +295,442 @@ class NetworkTrainer:
                 # train_op = optimizer.minimize(loss, global_step=batch_stage_1)
                 # Add ops to save and restore all the variables.
                 self.saver_31 = tf.compat.v1.train.Saver(max_to_keep=10)
+
+    def eval_graph_32(self):
+        # init graph_31
+        with self.graph_31.as_default():
+            # Create a session
+            config_31 = tf.compat.v1.ConfigProto()
+            config_31.gpu_options.allow_growth = True
+            config_31.allow_soft_placement = True
+            config_31.log_device_placement = False
+            self.sess_31 = tf.compat.v1.Session(graph = self.graph_31, config=config_31)
+            self.merged_31 = tf.compat.v1.summary.merge_all()
+            self.test_writer_31 = tf.compat.v1.summary.FileWriter(os.path.join(self.LOG_DIR, 'test'), self.sess_31.graph)                            
+            # load graph_31
+            init_31 = tf.compat.v1.global_variables_initializer()
+            self.sess_31.run(init_31)
+            self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_498.ckpt')
+            # build train ops
+            self.train_ops_31 = {'pointclouds_pl': self.pointclouds_pl,
+                                'labels_edge_p': self.labels_edge_p,
+                                'labels_corner_p': self.labels_corner_p,
+                                #'labels_direction': labels_direction,
+                                'reg_edge_p': self.reg_edge_p,
+                                'reg_corner_p': self.reg_corner_p,
+                                #'labels_type': labels_type,
+                                #'simmat_pl': simmat_pl,
+                                #'neg_simmat_pl': neg_simmat_pl,
+                                'is_training_31': self.is_training_31,
+                                'pred_labels_edge_p': self.pred_labels_edge_p,                   #  'pred_labels_edge_points'
+                                'pred_labels_corner_p': self.pred_labels_corner_p,
+                                #'pred_labels_direction': pred_labels_direction,
+                                'pred_reg_edge_p': self.pred_reg_edge_p,
+                                'pred_reg_corner_p': self.pred_reg_corner_p,
+                                #'pred_labels_type': pred_labels_type,
+                                #'pred_simmat': pred_simmat,
+                                #'pred_conf': pred_conf_logits,
+                                'edge_3_1_loss': self.edge_3_1_loss,
+                                'edge_3_1_recall':self.edge_3_1_recall,
+                                'edge_3_1_acc': self.edge_3_1_acc,
+                                'corner_3_1_loss': self.corner_3_1_loss,
+                                'corner_3_1_recall': self.corner_3_1_recall,
+                                'corner_3_1_acc': self.corner_3_1_acc,
+                                'reg_edge_3_1_loss': self.reg_edge_3_1_loss,
+                                'reg_corner_3_1_loss': self.reg_corner_3_1_loss,
+                                #'seg_3_2_acc': seg_3_2_acc,
+                                #'task_2_2_loss': task_2_2_loss,
+                                #'task_3_loss': task_3_loss,
+                                #'task_4_loss': task_4_loss,
+                                #'task_4_acc': task_4_acc,
+                                #'task_5_loss': task_5_loss,
+                                #'task_6_loss': task_6_loss,
+                                'loss': self.total_loss_31,
+                                'train_op': self.train_optimizer_31,
+                                'merged': self.merged_31,
+                                'step': self.batch_31}
+        tf.compat.v1.reset_default_graph()
+        # init graph_32
+        with self.graph_32.as_default():
+            # Create a session
+            config_32 = tf.compat.v1.ConfigProto()
+            config_32.gpu_options.allow_growth = True
+            config_32.allow_soft_placement = True
+            config_32.log_device_placement = False
+            self.sess_32 = tf.compat.v1.Session(graph = self.graph_32, config=config_32)
+            self.merged_32 = tf.compat.v1.summary.merge_all()
+            self.test_writer_32 = tf.compat.v1.summary.FileWriter(os.path.join(self.LOG_DIR, 'test'), self.sess_32.graph)
+            # load graph_31
+            init_32 = tf.compat.v1.global_variables_initializer()
+            self.sess_32.run(init_32)
+            self.saver_32.restore(self.sess_32, self.BASE_DIR+'/stage_2_log/model_32_498.ckpt')
+            
+            self.train_ops_32 = {
+               'sample_points_pl': self.sample_points_pl,
+               'mask_256_64_candidates_proposed': self.mask_256_64_candidates_proposed,
+               'mask_1_if_edge': self.mask_1_if_edge,
+               'mask_1_if_proposed': self.mask_1_if_proposed,
+               'labels_256_64_edge': self.labels_256_64_edge,
+               'labels_type': self.labels_type,
+               'labels_type_one_hot': self.labels_type_one_hot,
+               'pred_open_curve_seg': self.pred_open_curve_seg,
+               'pred_open_curve_cls': self.pred_open_curve_cls,
+               'pred_open_curve_reg_Line': self.pred_open_curve_reg_Line,
+               'pred_open_curve_reg_BSpline': self.pred_open_curve_reg_BSpline,
+               'end_points': self.end_points,
+               'is_training_32': self.is_training_32,
+               'total_seg_loss_32': self.seg_3_2_loss,
+               'total_cls_loss_32': self.cls_3_2_loss,
+               'total_reg_loss_32': self.reg_3_2_loss,
+               'total_mat_diff_loss_32': self.mat_diff_loss,
+               'total_loss_32': self.total_loss_32,
+               'train_op': self.train_optimizer_32,
+               'merged': self.merged_32,
+               'step': self.batch_32}        
+
+        for epoch in range(1):
+            self.log_string('**** TEST EPOCH %03d ****' % (epoch))
+            self.eval_one_epoch_32()
+            sys.stdout.flush()
+            #eval_one_epoch(sess, ops, test_writer)
+            #sys.stdout.flush()
+            # Save the variables to disk.
+    
+    def eval_one_epoch_32(self):
+        # Just one test_data matrix.
+        is_training_31 = True
+        is_training_32 = True
+        train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '4.mat')
+        load_data_start_time = time.time()
+        loadpath = self.BASE_DIR + '/test_data/new_test/'+train_matrices_names_list[0]
+        train_data = sio.loadmat(loadpath)['Training_data']
+        load_data_duration = time.time() - load_data_start_time
+        self.log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
+
+        num_data = train_data.shape[0]  # = 256
+        num_batch = num_data // self.BATCH_SIZE   # 256 // 32 = 8
+        total_loss_3_1 = 0.0
+        total_edge_3_1_loss = 0.0
+        total_edge_3_1_recall = 0.0
+        total_edge_3_1_acc = 0.0
+        total_corner_3_1_loss = 0.0
+        total_corner_3_1_recall = 0.0
+        total_corner_3_1_acc = 0.0
+        total_reg_edge_3_1_loss = 0.0
+        total_reg_corner_3_1_loss = 0.0
+        
+        total_loss_3_2 = 0.0
+        total_seg_3_2_loss = 0.0
+        total_cls_3_2_loss = 0.0
+        total_reg_3_2_loss = 0.0
+        total_mat_diff_3_2_loss = 0.0
+        process_start_time = time.time()
+        pred_labels_edge_p_val = np.zeros((num_data, self.NUM_POINT, 2), np.float32)
+        pred_labels_corner_p_val = np.zeros((num_data, self.NUM_POINT, 2), np.float32)
+        pred_reg_edge_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
+        pred_reg_corner_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
+        pred_open_curve_seg = np.zeros((num_data*256, 64, 2), np.float32)
+        pred_open_curve_cls = np.zeros((num_data*256, 4), np.float32)
+        pred_open_curve_reg_Line = np.zeros((num_data*256, 6), np.float32)
+        pred_open_curve_reg_BSpline = np.zeros((num_data*256, 12), np.float32)
+        #proposed_sample_points_pl = []
+        #proposed_sample_points_idx = []
+        #proposed_mask_1_if_proposed = []
+        #edge_mask_1_if_edge = []
+        #gt_idx_arrays = []
+        for j in range(num_batch):
+            # remember that num_batch will be 8
+            begin_idx = j*self.BATCH_SIZE
+            end_idx = (j+1)*self.BATCH_SIZE
+            data_cells = train_data[begin_idx: end_idx,0]
+
+            batch_inputs = np.zeros((self.BATCH_SIZE,self.NUM_POINT,3),np.float32)  # input point clouds  # original code  =6
+            batch_labels_edge_p = np.zeros((self.BATCH_SIZE,self.NUM_POINT),np.int32)  # edge point label 0/1
+            batch_labels_corner_p = np.zeros((self.BATCH_SIZE,self.NUM_POINT),np.int32)  # edge point label 0/1
+            batch_regression_edge = np.zeros((self.BATCH_SIZE,self.NUM_POINT,3),np.float32)  # each point normal estimation
+            batch_regression_corner = np.zeros((self.BATCH_SIZE,self.NUM_POINT,3),np.float32)
+
+            batch_open_gt_256_64_idx = np.zeros((self.BATCH_SIZE, 256, 64), np.int32)
+            #batch_open_gt_mask = np.zeros((self.BATCH_SIZE, 256, 64), np.int32)
+            batch_open_gt_type = np.zeros((self.BATCH_SIZE, 256, 1), np.int32)
+            batch_open_gt_type_one_hot = np.zeros((self.BATCH_SIZE, 256, 4), np.int32)
+            #batch_open_gt_res = np.zeros((self.BATCH_SIZE, 256, 6), np.float32)
+            #batch_open_gt_sample_points = np.zeros((self.BATCH_SIZE,256, 64, 3), np.float32)
+            #batch_open_gt_valid_mask = np.zeros((self.BATCH_SIZE,256, 1), np.int32)
+            batch_open_gt_pair_idx = np.zeros((self.BATCH_SIZE,256, 2), np.int32)
+
+            #batch_labels_type = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
+            #batch_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
+            #batch_neg_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
+            for cnt in range(self.BATCH_SIZE):
+                # cnt: 0 ... 31
+                tmp_data = data_cells[cnt]
+                batch_inputs[cnt,:,:] = tmp_data[0,0]['down_sample_point']
+                batch_labels_edge_p[cnt,:] = np.squeeze(tmp_data[0,0]['edge_points_label'])
+                batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data[0,0]['corner_points_label'])
+                #batch_labels_direction[cnt,:] = np.squeeze(tmp_data['motion_direction_class'][0,0])
+                batch_regression_edge[cnt,:,:] = tmp_data[0,0]['edge_points_residual_vector']
+                batch_regression_corner[cnt,:,:] = tmp_data[0,0]['corner_points_residual_vector']
+
+                ## check if these dimensions are correct
+                batch_open_gt_256_64_idx[cnt, ...] = tmp_data[0, 0]['open_gt_256_64_idx']
+                #batch_open_gt_sample_points[cnt, ...] = tmp_data[0, 0]['open_gt_sample_points']
+                #batch_open_gt_mask[cnt, ...] = tmp_data[0, 0]['open_gt_mask']
+                batch_open_gt_type[cnt, ...] = tmp_data[0, 0]['open_gt_type']
+                #batch_open_gt_res[cnt, ...] = tmp_data[0, 0]['open_gt_res']
+                #batch_open_gt_valid_mask[cnt, ...] = tmp_data[0, 0]['open_gt_valid_mask']
+                batch_open_gt_pair_idx[cnt, ...] = tmp_data[0, 0]['open_gt_pair_idx']
+                batch_open_gt_type_one_hot[cnt, ...] = tmp_data[0, 0]['open_type_onehot']
+
+                #batch_labels_type[cnt,:] = np.squeeze(tmp_data['motion_dof_type'][0,0])
+                #tmp_simmat = tmp_data['similar_matrix'][0,0]
+                #batch_simmat_pl[cnt,:,:] = tmp_simmat + tmp_simmat.T
+                #tmp_neg_simmat = 1 - tmp_simmat
+                #tmp_neg_simmat = tmp_neg_simmat - np.eye(NUM_POINT) 
+                #batch_neg_simmat_pl[cnt,:,:] = tmp_neg_simmat
+            
+            # run section 3.1.
+            with self.graph_31.as_default():
+                # batch waits.. feed this.
+                feed_dict = {self.train_ops_31['pointclouds_pl']: batch_inputs,
+                            self.train_ops_31['labels_edge_p']: batch_labels_edge_p,
+                            self.train_ops_31['labels_corner_p']: batch_labels_corner_p,
+                            #ops['labels_direction']: batch_labels_direction,
+                            self.train_ops_31['reg_edge_p']: batch_regression_edge,
+                            self.train_ops_31['reg_corner_p']: batch_regression_corner,
+                            #ops['labels_type']: batch_labels_type,
+                            #ops['simmat_pl']: batch_simmat_pl,
+                            #ops['neg_simmat_pl']: batch_neg_simmat_pl,
+                            #ops['is_training_32']: is_training_32}
+                            self.train_ops_31['is_training_31']: is_training_31}
+
+                summary, step, _, \
+                edge_3_1_loss_val, edge_3_1_recall_val, edge_3_1_acc_val, \
+                corner_3_1_loss_val, corner_3_1_recall_val, corner_3_1_acc_val, \
+                reg_edge_3_1_loss_val, reg_corner_3_1_loss_val, loss_3_1_val, \
+                pred_labels_edge_p_val[begin_idx:end_idx,:,:], pred_labels_corner_p_val[begin_idx:end_idx,:,:], \
+                pred_reg_edge_p_val[begin_idx:end_idx,:,:], pred_reg_corner_p_val[begin_idx:end_idx,:,:] = \
+                    self.sess_31.run([self.train_ops_31['merged'], self.train_ops_31['step'], self.train_ops_31['train_op'], \
+                        self.train_ops_31['edge_3_1_loss'], self.train_ops_31['edge_3_1_recall'], self.train_ops_31['edge_3_1_acc'],\
+                        self.train_ops_31['corner_3_1_loss'], self.train_ops_31['corner_3_1_recall'], self.train_ops_31['corner_3_1_acc'],\
+                        self.train_ops_31['reg_edge_3_1_loss'], self.train_ops_31['reg_corner_3_1_loss'], self.train_ops_31['loss'], \
+                        self.train_ops_31['pred_labels_edge_p'], self.train_ops_31['pred_labels_corner_p'], \
+                        self.train_ops_31['pred_reg_edge_p'], self.train_ops_31['pred_reg_corner_p']],feed_dict=feed_dict)
+
+                self.test_writer_31.add_summary(summary, step)
+                total_loss_3_1 += loss_3_1_val
+                total_edge_3_1_loss += edge_3_1_loss_val
+                total_edge_3_1_acc += edge_3_1_acc_val
+                total_edge_3_1_recall += edge_3_1_recall_val
+                total_corner_3_1_loss += corner_3_1_loss_val
+                total_corner_3_1_acc += corner_3_1_acc_val
+                total_corner_3_1_recall += corner_3_1_recall_val
+                total_reg_edge_3_1_loss += reg_edge_3_1_loss_val
+                total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
+
+            # Save results for visualization: Sec.3.1.
+            # subsection = 31
+            self.save_pred_results(batch_inputs = batch_inputs, \
+                                    pred_labels_edge_p_val = pred_labels_edge_p_val[begin_idx:end_idx,:,:], \
+                                    pred_reg_edge_p_val = pred_reg_edge_p_val[begin_idx:end_idx,:,:], \
+                                    pred_labels_corner_p_val = pred_labels_corner_p_val[begin_idx:end_idx,:,:], \
+                                    pred_reg_corner_p_val = pred_reg_corner_p_val[begin_idx:end_idx,:,:], \
+                                    batch_num = j, \
+                                    batch_labels_edge_p = batch_labels_edge_p, \
+                                    batch_labels_corner_p = batch_labels_corner_p, \
+                                    batch_regression_edge = batch_regression_edge, \
+                                    batch_regression_corner = batch_regression_corner,
+                                    stage = self.STAGE, 
+                                    subsection = 31)
+
+            # here takes the post processing place.
+            pred_labels_corner_p_val_softmax = ssp.softmax(pred_labels_corner_p_val[begin_idx:end_idx,:,:], axis = 2)
+            sample_points_pl, idx_B_256_64, idx_pair, mask_1_if_proposed, mask_256_64_candidates_proposed, pairs_available = self.corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val_softmax)
+            
+            # Save results for visualization: corner_pair_neighbor_search()
+            # make sure that  stage, subsection, batch_num are always entered.
+            # subsection = 311
+            self.save_pred_results(batch_inputs = batch_inputs, \
+                                    batch_num = j, \
+                                    pred_labels_corner_p_val_softmax = pred_labels_corner_p_val_softmax, \
+                                    sample_points_pl = np.array(sample_points_pl), \
+                                    idx_B_256_64 = idx_B_256_64, \
+                                    idx_pair = idx_pair, \
+                                    mask_1_if_proposed = np.array(mask_1_if_proposed), \
+                                    mask_256_64_candidates_proposed = np.array(mask_256_64_candidates_proposed), \
+                                    pairs_available = pairs_available, \
+                                    stage = self.STAGE, \
+                                    subsection = 311)
+
+            # open_gt_labels_pair: "it has to be 0 labeled if it is not a corner, although it is proposed."
+            # open_gt_labels_pair_1_if_proposed_anyway: "proposed? ok it is 1 no matter what"
+            #
+            # Note: Masks at loss!
+            # cls - mask_1_if_proposed will let you take only the proposals.
+            # seg - labels_256_64_edge                    will create loss in the first place, 
+            #     - mask_256_64_candidates_proposed           will take valid candidates only and
+            #     - mask_1_if_edge                 will take suitable corners only.
+            #proposed_sample_points_pl.append(sample_points_pl)
+            #proposed_sample_points_idx.append(idx_B_256_64)
+            #proposed_mask_1_if_proposed.append(mask_1_if_proposed)
+            labels_256_64_edge, mask_1_if_edge, labels_type, labels_type_one_hot, gt_idx_array = self.corner_pair_label_generator(idx_B_256_64, \
+                                                                                                                idx_pair, \
+                                                                                                                mask_1_if_proposed, \
+                                                                                                                pairs_available, \
+                                                                                                                batch_inputs, \
+                                                                                                                batch_open_gt_pair_idx, \
+                                                                                                                batch_open_gt_256_64_idx, \
+                                                                                                                batch_open_gt_type, \
+                                                                                                                batch_open_gt_type_one_hot)
+            # subsection = 312
+            # it is rather recommended to use sample_points_pl not batch_inputs here, let us keep it this way.
+            self.save_pred_results(batch_inputs = batch_inputs, \
+                                   idx_B_256_64 = idx_B_256_64 , \
+                                   idx_pair = idx_pair, \
+                                   mask_1_if_proposed = np.array(mask_1_if_proposed), \
+                                   pairs_available = pairs_available, \
+                                   batch_open_gt_pair_idx = batch_open_gt_pair_idx, \
+                                   batch_open_gt_256_64_idx = batch_open_gt_256_64_idx, \
+                                   batch_open_gt_type = batch_open_gt_type, \
+                                   batch_open_gt_type_one_hot = batch_open_gt_type_one_hot, \
+                                   batch_num = j, \
+                                   labels_256_64_edge = labels_256_64_edge, \
+                                   mask_1_if_edge = mask_1_if_edge ,\
+                                   mask_256_64_candidates_proposed = np.array(mask_256_64_candidates_proposed), \
+                                   labels_type = labels_type, \
+                                   labels_type_one_hot = labels_type_one_hot, \
+                                   gt_idx_array = gt_idx_array, \
+                                   sample_points_pl = np.array(sample_points_pl), \
+                                   stage = self.STAGE, \
+                                   subsection = 312)
+
+            sample_points_pl = np.concatenate([sample_points_pl[i] for i in range(len(sample_points_pl))], axis = 0) # this will be [N, 64, 3]
+            mask_256_64_candidates_proposed = np.concatenate([mask_256_64_candidates_proposed[i] for i in range(len(mask_256_64_candidates_proposed))], axis = 0)
+            mask_1_if_proposed = np.concatenate([mask_1_if_proposed[i] for i in range(len(mask_1_if_proposed))], axis = 0)
+
+            sample_points_pl = sample_points_pl.astype(np.float32)
+            labels_256_64_edge = labels_256_64_edge.astype(np.int32)
+            labels_type = labels_type.astype(np.int32)
+            labels_type_one_hot = labels_type_one_hot.astype(np.int32)
+            mask_256_64_candidates_proposed = mask_256_64_candidates_proposed.astype(np.int32)
+            mask_1_if_edge = mask_1_if_edge.astype(np.int32)
+            #edge_mask_1_if_edge.append(mask_1_if_edge)
+            #gt_idx_arrays.append(gt_idx_array)
+            mask_1_if_proposed = mask_1_if_proposed.astype(np.int32)
+
+            with self.graph_32.as_default():
+                feed_dict = {self.train_ops_32['sample_points_pl']: sample_points_pl,\
+                                self.train_ops_32['labels_type']: labels_type, \
+                                self.train_ops_32['labels_256_64_edge']: labels_256_64_edge, \
+                                self.train_ops_32['labels_type_one_hot']: labels_type_one_hot, \
+                                self.train_ops_32['mask_256_64_candidates_proposed']: mask_256_64_candidates_proposed, \
+                                self.train_ops_32['mask_1_if_edge']: mask_1_if_edge, \
+                                self.train_ops_32['mask_1_if_proposed']: mask_1_if_proposed, \
+                                self.train_ops_32['is_training_32']: is_training_32}
+                # session run
+                summary, step, _, \
+                seg_3_2_loss_val, \
+                cls_3_2_loss_val, \
+                reg_3_2_loss_val, \
+                mat_diff_3_2_loss_val, \
+                loss_3_2_val, \
+                pred_open_curve_seg[begin_idx*256:end_idx*256, ...], \
+                pred_open_curve_cls[begin_idx*256:end_idx*256, ...], \
+                pred_open_curve_reg_Line[begin_idx*256:end_idx*256, ...], \
+                pred_open_curve_reg_BSpline[begin_idx*256:end_idx*256, ...], \
+                = self.sess_32.run([self.train_ops_32['merged'], \
+                                    self.train_ops_32['step'], \
+                                    self.train_ops_32['train_op'], \
+                                    self.train_ops_32['total_seg_loss_32'], \
+                                    self.train_ops_32['total_cls_loss_32'], \
+                                    self.train_ops_32['total_reg_loss_32'], \
+                                    self.train_ops_32['total_mat_diff_loss_32'], \
+                                    self.train_ops_32['total_loss_32'], \
+                                    self.train_ops_32['pred_open_curve_seg'], \
+                                    self.train_ops_32['pred_open_curve_cls'], \
+                                    self.train_ops_32['pred_open_curve_reg_Line'], \
+                                    self.train_ops_32['pred_open_curve_reg_BSpline'], \
+                                    ],feed_dict=feed_dict)
+                # loss
+                total_seg_3_2_loss += seg_3_2_loss_val
+                total_cls_3_2_loss += cls_3_2_loss_val
+                total_reg_3_2_loss += reg_3_2_loss_val
+                total_mat_diff_3_2_loss += mat_diff_3_2_loss_val
+                total_loss_3_2 += loss_3_2_val
+
+            self.save_pred_results(sample_points_pl = sample_points_pl, \
+                        labels_type = labels_type, \
+                        labels_256_64_edge = labels_256_64_edge, \
+                        labels_type_one_hot = labels_type_one_hot, \
+                        mask_256_64_candidates_proposed = mask_256_64_candidates_proposed, \
+                        batch_num = j, \
+                        mask_1_if_edge = mask_1_if_edge, \
+                        mask_1_if_proposed = mask_1_if_proposed, \
+                        pred_open_curve_seg = pred_open_curve_seg[begin_idx*256:end_idx*256, ...], \
+                        pred_open_curve_cls = pred_open_curve_cls[begin_idx*256:end_idx*256, ...], \
+                        pred_open_curve_reg_Line = pred_open_curve_reg_Line[begin_idx*256:end_idx*256, ...], \
+                        pred_open_curve_reg_BSpline = pred_open_curve_reg_BSpline[begin_idx*256:end_idx*256, ...], \
+                        stage = self.STAGE, \
+                        subsection = 32)
+
+        # total loss
+        total_loss_3_1 = total_loss_3_1 * 1.0 / num_batch
+        total_edge_3_1_loss = total_edge_3_1_loss * 1.0 / num_batch
+        total_edge_3_1_acc = total_edge_3_1_acc * 1.0 / num_batch
+        total_edge_3_1_recall = total_edge_3_1_recall * 1.0 / num_batch
+        total_corner_3_1_loss = total_corner_3_1_loss * 1.0 / num_batch
+        total_corner_3_1_acc = total_corner_3_1_acc * 1.0 / num_batch
+        total_corner_3_1_recall = total_corner_3_1_recall * 1.0 / num_batch
+        total_reg_edge_3_1_loss = total_reg_edge_3_1_loss * 1.0 / num_batch
+        total_reg_corner_3_1_loss = total_reg_corner_3_1_loss * 1.0 / num_batch
+        
+        total_loss_3_2 = total_loss_3_2 * 1.0 / num_batch
+        total_cls_3_2_loss = total_cls_3_2_loss * 1.0 / num_batch
+        total_seg_3_2_loss = total_seg_3_2_loss * 1.0 / num_batch
+        total_reg_3_2_loss = total_reg_3_2_loss * 1.0 / num_batch
+        total_mat_diff_3_2_loss = total_mat_diff_3_2_loss * 1.0 / num_batch
+
+        process_duration = time.time() - process_start_time
+        examples_per_sec = num_data/process_duration
+        sec_per_batch = process_duration/num_batch
+        self.log_string('\t%s: step: %f total_loss_3_1: %f total_loss_3_2: %f duration time %.3f (%.1f examples/sec; %.3f sec/batch)' \
+        % (datetime.now(),step, total_loss_3_1, total_loss_3_2 ,process_duration,examples_per_sec,sec_per_batch))
+        self.log_string('\t\tTest Total_3_1 Mean_Loss: %f' % total_loss_3_1)
+        self.log_string('\t\tTest Edge_3_1 Mean_Loss: %f' % total_edge_3_1_loss)
+        self.log_string('\t\tTest Edge_3_1 Mean_Accuracy: %f' % total_edge_3_1_acc)
+        self.log_string('\t\tTest Edge_3_1 Mean_Recall: %f' % total_edge_3_1_recall)
+        self.log_string('\t\tTest Corner_3_1 Mean_Loss: %f' % total_corner_3_1_loss)
+        self.log_string('\t\tTest Corner_3_1 Mean_Accuracy: %f' % total_corner_3_1_acc)
+        self.log_string('\t\tTest Corner_3_1 Mean_Recall: %f' % total_corner_3_1_recall)
+        self.log_string('\t\tTest Reg_Edge_3_1 Mean_Loss: %f' % total_reg_edge_3_1_loss)
+        self.log_string('\t\tTest Reg_Corner_3_1 Mean_Loss: %f' % total_reg_corner_3_1_loss)
+        
+        self.log_string('\t\tTraining Total_3_2 Mean_Loss: %f' % total_loss_3_2)
+        self.log_string('\t\tTraining Seg_3_2 Mean_Loss: %f' % total_seg_3_2_loss)
+        self.log_string('\t\tTraining Cls_3_2 Mean_Loss: %f' % total_cls_3_2_loss)
+        self.log_string('\t\tTraining Reg_3_2 Mean_Loss: %f' % total_reg_3_2_loss)
+        self.log_string('\t\tTraining Mat_Diff_3_2 Mean_Loss: %f' % total_mat_diff_3_2_loss)
+
+        # save them!
+        '''
+        predictions = {'train_data':train_data,
+                       'pred_labels_edge_p_val':pred_labels_edge_p_val, 
+                       'pred_labels_corner_p_val':pred_labels_corner_p_val, 
+                       'pred_reg_edge_p_val':pred_reg_edge_p_val, 
+                       'pred_reg_corner_p_val':pred_reg_corner_p_val, 
+                       'pred_open_curve_seg':pred_open_curve_seg, 
+                       'pred_open_curve_cls':pred_open_curve_cls, 
+                       'pred_open_curve_reg_Line':pred_open_curve_reg_Line, 
+                       'pred_open_curve_reg_BSpline':pred_open_curve_reg_BSpline, 
+                       'proposed_sample_points_pl':proposed_sample_points_pl, 
+                       'proposed_sample_points_idx':proposed_sample_points_idx,
+                       'proposed_mask_1_if_proposed': proposed_mask_1_if_proposed,
+                       'edge_mask_1_if_edge': edge_mask_1_if_edge,
+                       'gt_idx_arrays': gt_idx_arrays}
+        
+        np.save(os.path.join('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/', train_matrices_names_list[0][:-4]+'_mat_predictions.npy'), predictions)
+        #np.save('predictions.npy',predictions)
+        '''
     
     def train_graph_32(self):
         # init graph_31
@@ -365,15 +807,16 @@ class NetworkTrainer:
             
             self.train_ops_32 = {
                'sample_points_pl': self.sample_points_pl,
-               'mask_256_64_candidates': self.mask_256_64_candidates,
-               'mask_1_if_corner': self.mask_1_if_corner,
+               'mask_256_64_candidates_proposed': self.mask_256_64_candidates_proposed,
+               'mask_1_if_edge': self.mask_1_if_edge,
                'mask_1_if_proposed': self.mask_1_if_proposed,
-               'labels_256_64': self.labels_256_64,
+               'labels_256_64_edge': self.labels_256_64_edge,
                'labels_type': self.labels_type,
                'labels_type_one_hot': self.labels_type_one_hot,
                'pred_open_curve_seg': self.pred_open_curve_seg,
                'pred_open_curve_cls': self.pred_open_curve_cls,
-               'pred_open_curve_reg': self.pred_open_curve_reg,
+               'pred_open_curve_reg_Line': self.pred_open_curve_reg_Line,
+               'pred_open_curve_reg_BSpline': self.pred_open_curve_reg_BSpline,
                'end_points': self.end_points,
                'is_training_32': self.is_training_32,
                'total_seg_loss_32': self.seg_3_2_loss,
@@ -393,13 +836,11 @@ class NetworkTrainer:
             #eval_one_epoch(sess, ops, test_writer)
             #sys.stdout.flush()
             # Save the variables to disk.
-            '''
             if epoch % 2 == 0:
-                model_ccc_path = "model"+str(epoch)+".ckpt"
+                model_ccc_path = "model_32_"+str(epoch)+".ckpt"
                 save_path = self.saver_32.save(self.sess_32, os.path.join(self.LOG_DIR, model_ccc_path))
                 self.log_string("Model saved in file: %s" % save_path)
-            '''
-
+            
     def train_one_epoch_32(self):
         is_training_31 = True
         is_training_32 = True
@@ -454,7 +895,9 @@ class NetworkTrainer:
             pred_reg_corner_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
             pred_open_curve_seg = np.zeros((num_data*256, 64, 2), np.float32)
             pred_open_curve_cls = np.zeros((num_data*256, 4), np.float32)
-            pred_open_curve_reg = np.zeros((num_data*256, 6), np.float32)
+            pred_open_curve_reg_Line = np.zeros((num_data*256, 6), np.float32)
+            pred_open_curve_reg_BSpline = np.zeros((num_data*256, 12), np.float32)
+
             np.random.shuffle(train_data)
             for j in range(num_batch):
                 # remember that num_batch will be 8
@@ -548,18 +991,18 @@ class NetworkTrainer:
 
                 # here takes the post processing place.
                 pred_labels_corner_p_val_softmax = ssp.softmax(pred_labels_corner_p_val[begin_idx:end_idx,:,:], axis = 2)
-                sample_points_pl, idx_B_256_64, idx_pair, mask_1_if_proposed, mask_256_64_candidates, pairs_available = self.corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val_softmax)
+                sample_points_pl, idx_B_256_64, idx_pair, mask_1_if_proposed, mask_256_64_candidates_proposed, pairs_available = self.corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val_softmax)
 
                 # open_gt_labels_pair: "it has to be 0 labeled if it is not a corner, although it is proposed."
                 # open_gt_labels_pair_1_if_proposed_anyway: "proposed? ok it is 1 no matter what"
                 #
                 # Note: Masks at loss!
                 # cls - mask_1_if_proposed will let you take only the proposals.
-                # seg - labels_256_64                    will create loss in the first place, 
-                #     - mask_256_64_candidates           will take valid candidates only and
-                #     - mask_1_if_corner                 will take suitable corners only.
+                # seg - labels_256_64_edge                    will create loss in the first place, 
+                #     - mask_256_64_candidates_proposed           will take valid candidates only and
+                #     - mask_1_if_edge                 will take suitable corners only.
                 
-                labels_256_64, mask_1_if_corner, labels_type, labels_type_one_hot = self.corner_pair_label_generator(idx_B_256_64, \
+                labels_256_64_edge, mask_1_if_edge, labels_type, labels_type_one_hot, gt_idx_array = self.corner_pair_label_generator(idx_B_256_64, \
                                                                                                                     idx_pair, \
                                                                                                                     mask_1_if_proposed, \
                                                                                                                     pairs_available, \
@@ -569,24 +1012,24 @@ class NetworkTrainer:
                                                                                                                     batch_open_gt_type, \
                                                                                                                     batch_open_gt_type_one_hot)
                 sample_points_pl = np.concatenate([sample_points_pl[i] for i in range(len(sample_points_pl))], axis = 0) # this will be [N, 64, 3]
-                mask_256_64_candidates = np.concatenate([mask_256_64_candidates[i] for i in range(len(mask_256_64_candidates))], axis = 0)
+                mask_256_64_candidates_proposed = np.concatenate([mask_256_64_candidates_proposed[i] for i in range(len(mask_256_64_candidates_proposed))], axis = 0)
                 mask_1_if_proposed = np.concatenate([mask_1_if_proposed[i] for i in range(len(mask_1_if_proposed))], axis = 0)
 
                 sample_points_pl = sample_points_pl.astype(np.float32)
-                labels_256_64 = labels_256_64.astype(np.int32)
+                labels_256_64_edge = labels_256_64_edge.astype(np.int32)
                 labels_type = labels_type.astype(np.int32)
                 labels_type_one_hot = labels_type_one_hot.astype(np.int32)
-                mask_256_64_candidates = mask_256_64_candidates.astype(np.int32)
-                mask_1_if_corner = mask_1_if_corner.astype(np.int32)
+                mask_256_64_candidates_proposed = mask_256_64_candidates_proposed.astype(np.int32)
+                mask_1_if_edge = mask_1_if_edge.astype(np.int32)
                 mask_1_if_proposed = mask_1_if_proposed.astype(np.int32)
 
                 with self.graph_32.as_default():
                     feed_dict = {self.train_ops_32['sample_points_pl']: sample_points_pl,\
                                  self.train_ops_32['labels_type']: labels_type, \
-                                 self.train_ops_32['labels_256_64']: labels_256_64, \
+                                 self.train_ops_32['labels_256_64_edge']: labels_256_64_edge, \
                                  self.train_ops_32['labels_type_one_hot']: labels_type_one_hot, \
-                                 self.train_ops_32['mask_256_64_candidates']: mask_256_64_candidates, \
-                                 self.train_ops_32['mask_1_if_corner']: mask_1_if_corner, \
+                                 self.train_ops_32['mask_256_64_candidates_proposed']: mask_256_64_candidates_proposed, \
+                                 self.train_ops_32['mask_1_if_edge']: mask_1_if_edge, \
                                  self.train_ops_32['mask_1_if_proposed']: mask_1_if_proposed, \
                                  self.train_ops_32['is_training_32']: is_training_32}
                     # session run
@@ -598,7 +1041,8 @@ class NetworkTrainer:
                     loss_3_2_val, \
                     pred_open_curve_seg[begin_idx*256:end_idx*256, ...], \
                     pred_open_curve_cls[begin_idx*256:end_idx*256, ...], \
-                    pred_open_curve_reg[begin_idx*256:end_idx*256, ...], \
+                    pred_open_curve_reg_Line[begin_idx*256:end_idx*256, ...], \
+                    pred_open_curve_reg_BSpline[begin_idx*256:end_idx*256, ...], \
                     = self.sess_32.run([self.train_ops_32['merged'], \
                                         self.train_ops_32['step'], \
                                         self.train_ops_32['train_op'], \
@@ -609,7 +1053,8 @@ class NetworkTrainer:
                                         self.train_ops_32['total_loss_32'], \
                                         self.train_ops_32['pred_open_curve_seg'], \
                                         self.train_ops_32['pred_open_curve_cls'], \
-                                        self.train_ops_32['pred_open_curve_reg'], \
+                                        self.train_ops_32['pred_open_curve_reg_Line'], \
+                                        self.train_ops_32['pred_open_curve_reg_BSpline'], \
                                         ],feed_dict=feed_dict)
                     # loss
                     total_seg_3_2_loss += seg_3_2_loss_val
@@ -658,9 +1103,7 @@ class NetworkTrainer:
             self.log_string('\t\tTraining Cls_3_2 Mean_Loss: %f' % total_cls_3_2_loss)
             self.log_string('\t\tTraining Reg_3_2 Mean_Loss: %f' % total_reg_3_2_loss)
             self.log_string('\t\tTraining Mat_Diff_3_2 Mean_Loss: %f' % total_mat_diff_3_2_loss)
-            
-            
-
+                        
     def train_graph_31(self):
         
         with self.graph_31.as_default():
@@ -725,9 +1168,9 @@ class NetworkTrainer:
                 self.log_string('**** TRAIN EPOCH %03d ****' % (epoch))
                 self.train_one_epoch_31()
                 sys.stdout.flush()
-                #log_string('**** TEST EPOCH %03d ****' % (epoch))
-                #eval_one_epoch(sess, ops, test_writer)
-                #sys.stdout.flush()
+                self.log_string('**** TEST EPOCH %03d ****' % (epoch))
+                self.eval_one_epoch_31()
+                sys.stdout.flush()
                 # Save the variables to disk.
                 if epoch % 2 == 0:
                     model_ccc_path = "model_31_"+str(epoch)+".ckpt"
@@ -769,9 +1212,9 @@ class NetworkTrainer:
             total_corner_3_1_acc = 0.0
             total_reg_edge_3_1_loss = 0.0
             total_reg_corner_3_1_loss = 0.0
-            total_seg_3_2_loss = 0.0
-            total_cls_3_2_loss = 0.0
-            total_reg_3_2_loss = 0.0
+            #total_seg_3_2_loss = 0.0
+            #total_cls_3_2_loss = 0.0
+            #total_reg_3_2_loss = 0.0
     #        total_task_2_2_loss = 0.0
     #        total_task_3_loss = 0.0
     #        total_task_4_loss = 0.0
@@ -899,6 +1342,187 @@ class NetworkTrainer:
             self.log_string('\t\tTraining Corner_3_1 Mean_Recall: %f' % total_corner_3_1_recall)
             self.log_string('\t\tTraining Reg_Edge_3_1 Mean_Loss: %f' % total_reg_edge_3_1_loss)
             self.log_string('\t\tTraining Reg_Corner_3_1 Mean_Loss: %f' % total_reg_corner_3_1_loss)      
+
+    def eval_one_epoch_31(self):
+        is_training_31 = True
+        # make sure that there are 4*n matrices
+        train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '*.mat')
+        matrix_num = len(train_matrices_names_list)
+        permutation = np.random.permutation(matrix_num)
+        # 4 matrices?
+        for i in range(len(permutation)//4):
+            load_data_start_time = time.time()
+            loadpath = self.BASE_DIR + '/test_data/new_test/'+train_matrices_names_list[permutation[i*4]]
+            train_data = sio.loadmat(loadpath)['Training_data']
+            load_data_duration = time.time() - load_data_start_time
+            self.log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
+            for j in range(3):
+                temp_load_data_start_time = time.time()
+                temp_loadpath = self.BASE_DIR + '/test_data/new_test/'+train_matrices_names_list[permutation[i*4+j+1]]
+                temp_train_data = sio.loadmat(temp_loadpath)['Training_data']
+                temp_load_data_duration = time.time() - temp_load_data_start_time
+                self.log_string('\t%s: %s load time: %f' % (datetime.now(),temp_loadpath,temp_load_data_duration))
+                train_data = np.concatenate((train_data,temp_train_data),axis = 0)
+                print(train_data.shape)
+
+            #push_eval(train_data, ops, sess, train_writer, is_training)
+            # num_data = 64*4 = 256
+            # num_batch = 256 // 32 = 8
+            num_data = train_data.shape[0]  # = 256
+            num_batch = num_data // self.BATCH_SIZE   # 256 // 32 = 8
+            total_loss = 0.0
+            total_edge_3_1_loss = 0.0
+            total_edge_3_1_recall = 0.0
+            total_edge_3_1_acc = 0.0
+            total_corner_3_1_loss = 0.0
+            total_corner_3_1_recall = 0.0
+            total_corner_3_1_acc = 0.0
+            total_reg_edge_3_1_loss = 0.0
+            total_reg_corner_3_1_loss = 0.0
+            #total_seg_3_2_loss = 0.0
+            #total_cls_3_2_loss = 0.0
+            #total_reg_3_2_loss = 0.0
+    #        total_task_2_2_loss = 0.0
+    #        total_task_3_loss = 0.0
+    #        total_task_4_loss = 0.0
+    #        total_task_4_acc = 0.0
+    #        total_task_5_loss = 0.0
+    #        total_task_6_loss = 0.0
+            process_start_time = time.time()
+            pred_labels_edge_p_val = np.zeros((num_data, self.NUM_POINT, 2), np.float32)
+            pred_labels_corner_p_val = np.zeros((num_data, self.NUM_POINT, 2), np.float32)
+            pred_reg_edge_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
+            pred_reg_corner_p_val = np.zeros((num_data, self.NUM_POINT, 3), np.float32)
+            np.random.shuffle(train_data)
+            for j in range(num_batch):
+                # remember that num_batch will be 8
+                begin_idx = j*self.BATCH_SIZE
+                end_idx = (j+1)*self.BATCH_SIZE
+                data_cells = train_data[begin_idx: end_idx,0]
+
+                batch_inputs = np.zeros((self.BATCH_SIZE,self.NUM_POINT,3),np.float32)  # input point clouds  # original code  =6
+                batch_labels_edge_p = np.zeros((self.BATCH_SIZE,self.NUM_POINT),np.int32)  # edge point label 0/1
+                batch_labels_corner_p = np.zeros((self.BATCH_SIZE,self.NUM_POINT),np.int32)  # edge point label 0/1
+                batch_regression_edge = np.zeros((self.BATCH_SIZE,self.NUM_POINT,3),np.float32)  # each point normal estimation
+                batch_regression_corner = np.zeros((self.BATCH_SIZE,self.NUM_POINT,3),np.float32)
+
+                #batch_labels_type = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
+                #batch_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
+                #batch_neg_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
+                for cnt in range(self.BATCH_SIZE):
+                    # cnt: 0 ... 31
+                    tmp_data = data_cells[cnt]
+                    batch_inputs[cnt,:,:] = tmp_data[0,0]['down_sample_point']
+                    batch_labels_edge_p[cnt,:] = np.squeeze(tmp_data[0,0]['edge_points_label'])
+                    batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data[0,0]['corner_points_label'])
+                    #batch_labels_direction[cnt,:] = np.squeeze(tmp_data['motion_direction_class'][0,0])
+                    batch_regression_edge[cnt,:,:] = tmp_data[0,0]['edge_points_residual_vector']
+                    batch_regression_corner[cnt,:,:] = tmp_data[0,0]['corner_points_residual_vector']
+
+                    #batch_labels_type[cnt,:] = np.squeeze(tmp_data['motion_dof_type'][0,0])
+                    #tmp_simmat = tmp_data['similar_matrix'][0,0]
+                    #batch_simmat_pl[cnt,:,:] = tmp_simmat + tmp_simmat.T
+                    #tmp_neg_simmat = 1 - tmp_simmat
+                    #tmp_neg_simmat = tmp_neg_simmat - np.eye(NUM_POINT) 
+                    #batch_neg_simmat_pl[cnt,:,:] = tmp_neg_simmat
+                feed_dict = {self.train_ops_31['pointclouds_pl']: batch_inputs,
+                            self.train_ops_31['labels_edge_p']: batch_labels_edge_p,
+                            self.train_ops_31['labels_corner_p']: batch_labels_corner_p,
+                            #ops['labels_direction']: batch_labels_direction,
+                            self.train_ops_31['reg_edge_p']: batch_regression_edge,
+                            self.train_ops_31['reg_corner_p']: batch_regression_corner,
+                            #ops['labels_type']: batch_labels_type,
+                            #ops['simmat_pl']: batch_simmat_pl,
+                            #ops['neg_simmat_pl']: batch_neg_simmat_pl,
+                            #ops['is_training_32']: is_training_32}
+                            self.train_ops_31['is_training_31']: is_training_31}
+                            
+                        
+    #            summary, step, _, task_1_loss_val,task_1_recall_val,task_1_acc_val,task_2_1_loss_val,task_2_1_acc_val,task_2_2_loss_val, \
+    #                                 task_3_loss_val,task_4_loss_val,task_4_acc_val,task_5_loss_val, \
+    #                                 task_6_loss_val, loss_val = sess.run([ops['merged'], ops['step'], \
+    #                                 ops['train_op'], ops['task_1_loss'], ops['task_1_recall'],ops['task_1_acc'],ops['task_2_1_loss'], \
+    #                                 ops['task_2_1_acc'],ops['task_2_2_loss'],ops['task_3_loss'],ops['task_4_loss'], \
+    #                                 ops['task_4_acc'],ops['task_5_loss'],ops['task_6_loss'],ops['loss']],feed_dict=feed_dict)            
+                
+                summary, step, _, \
+                edge_3_1_loss_val, edge_3_1_recall_val, edge_3_1_acc_val, \
+                corner_3_1_loss_val, corner_3_1_recall_val, corner_3_1_acc_val, \
+                reg_edge_3_1_loss_val, reg_corner_3_1_loss_val, loss_val, \
+                pred_labels_edge_p_val[begin_idx:end_idx,:,:], pred_labels_corner_p_val[begin_idx:end_idx,:,:], \
+                pred_reg_edge_p_val[begin_idx:end_idx,:,:], pred_reg_corner_p_val[begin_idx:end_idx,:,:] = \
+                    self.sess_31.run([self.train_ops_31['merged'], self.train_ops_31['step'], self.train_ops_31['train_op'], \
+                        self.train_ops_31['edge_3_1_loss'], self.train_ops_31['edge_3_1_recall'], self.train_ops_31['edge_3_1_acc'],\
+                        self.train_ops_31['corner_3_1_loss'], self.train_ops_31['corner_3_1_recall'], self.train_ops_31['corner_3_1_acc'],\
+                        self.train_ops_31['reg_edge_3_1_loss'], self.train_ops_31['reg_corner_3_1_loss'], self.train_ops_31['loss'], \
+                        self.train_ops_31['pred_labels_edge_p'], self.train_ops_31['pred_labels_corner_p'], \
+                        self.train_ops_31['pred_reg_edge_p'], self.train_ops_31['pred_reg_corner_p']],feed_dict=feed_dict)                 
+                
+                self.save_pred_results(batch_inputs = batch_inputs, \
+                                       pred_labels_edge_p_val = pred_labels_edge_p_val[begin_idx:end_idx,:,:], \
+                                       pred_reg_edge_p_val = pred_reg_edge_p_val[begin_idx:end_idx,:,:], \
+                                       pred_labels_corner_p_val = pred_labels_corner_p_val[begin_idx:end_idx,:,:], \
+                                       pred_reg_corner_p_val = pred_reg_corner_p_val[begin_idx:end_idx,:,:], \
+                                       batch_num = j, \
+                                       batch_labels_edge_p = batch_labels_edge_p, \
+                                       batch_labels_corner_p = batch_labels_corner_p, \
+                                       batch_regression_edge = batch_regression_edge, \
+                                       batch_regression_corner = batch_regression_corner,
+                                       stage = self.STAGE, 
+                                       subsection = 31)
+                
+                self.train_writer_31.add_summary(summary, step)
+                total_loss += loss_val
+                total_edge_3_1_loss += edge_3_1_loss_val
+                total_edge_3_1_acc += edge_3_1_acc_val
+                total_edge_3_1_recall += edge_3_1_recall_val
+                total_corner_3_1_loss += corner_3_1_loss_val
+                total_corner_3_1_acc += corner_3_1_acc_val
+                total_corner_3_1_recall += corner_3_1_recall_val
+                total_reg_edge_3_1_loss += reg_edge_3_1_loss_val
+                total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
+    #            total_task_2_1_loss += task_2_1_loss_val
+    #            total_task_2_1_acc += task_2_1_acc_val
+    #            total_task_2_2_loss += task_2_2_loss_val
+    #            total_task_3_loss += task_3_loss_val
+    #            total_task_4_loss += task_4_loss_val
+    #            total_task_4_acc += task_4_acc_val
+    #            total_task_5_loss += task_5_loss_val
+    #            total_task_6_loss += task_6_loss_val
+                #print('loss: %f' % loss_val)
+            total_loss = total_loss * 1.0 / num_batch
+            total_edge_3_1_loss = total_edge_3_1_loss * 1.0 / num_batch
+            total_edge_3_1_acc = total_edge_3_1_acc * 1.0 / num_batch
+            total_edge_3_1_recall = total_edge_3_1_recall * 1.0 / num_batch
+            total_corner_3_1_loss = total_corner_3_1_loss * 1.0 / num_batch
+            total_corner_3_1_acc = total_corner_3_1_acc * 1.0 / num_batch
+            total_corner_3_1_recall = total_corner_3_1_recall * 1.0 / num_batch
+            total_reg_edge_3_1_loss = total_reg_edge_3_1_loss * 1.0 / num_batch
+            total_reg_corner_3_1_loss = total_reg_corner_3_1_loss * 1.0 / num_batch
+    
+            process_duration = time.time() - process_start_time
+            examples_per_sec = num_data/process_duration
+            sec_per_batch = process_duration/num_batch
+            self.log_string('\t%s: step: %f loss: %f duration time %.3f (%.1f examples/sec; %.3f sec/batch)' \
+            % (datetime.now(),step,total_loss,process_duration,examples_per_sec,sec_per_batch))
+            self.log_string('\t\tTraining Edge_3_1 Mean_Loss: %f' % total_edge_3_1_loss)
+            self.log_string('\t\tTraining Edge_3_1 Mean_Accuracy: %f' % total_edge_3_1_acc)
+            self.log_string('\t\tTraining Edge_3_1 Mean_Recall: %f' % total_edge_3_1_recall)
+            self.log_string('\t\tTraining Corner_3_1 Mean_Loss: %f' % total_corner_3_1_loss)
+            self.log_string('\t\tTraining Corner_3_1 Mean_Accuracy: %f' % total_corner_3_1_acc)
+            self.log_string('\t\tTraining Corner_3_1 Mean_Recall: %f' % total_corner_3_1_recall)
+            self.log_string('\t\tTraining Reg_Edge_3_1 Mean_Loss: %f' % total_reg_edge_3_1_loss)
+            self.log_string('\t\tTraining Reg_Corner_3_1 Mean_Loss: %f' % total_reg_corner_3_1_loss)      
+        
+    def save_pred_results(self, **kwargs):
+        dir = os.path.join(self.BASE_DIR, "test_results")
+        if not os.path.exists(dir): 
+            os.mkdir(dir)
+        stage = 'stage_' + str(kwargs['stage'])+'_'
+        batch = 'batch_' + str(kwargs['batch_num'])+'_'
+        subsection = 'subsection_' + str(kwargs['subsection'])
+        filename = stage+batch+subsection
+        np.save(os.path.join(dir, filename + '.npy'), kwargs)
 
     def log_string(self, out_str):
         self.LOG_FOUT.write(out_str+'\n')
@@ -1114,8 +1738,9 @@ class NetworkTrainer:
         sample_valid_mask_pair_labels_for_loss = np.zeros((batch_num, 256, 1), dtype = np.int16)
         sample_corner_type = np.zeros((batch_num, 256), dtype = np.int16)
         sample_corner_type_one_hot = np.zeros((batch_num, 256, 4), dtype = np.int16)
+        gt_idx_array = np.zeros((batch_num, 256), dtype = np.int16)
         points_cloud_np = points_cloud
-        dist_threshold = 1
+        dist_threshold = 1.5
         n_values = 4
 
         # sample_valid_mask_256_64
@@ -1134,6 +1759,7 @@ class NetworkTrainer:
                         gt_idx = np.where((sample_pair_idx[i][k] == batch_open_gt_pair_idx[i, :, :]).all(axis = 1))[0]
                         # gt_idx = np.where(batch_open_gt_pair_idx[i][k].numpy() in my_mat['open_gt_pair_idx'][0, 0])[0][0]
                         # my_mat[0, 0]['open_gt_256_64_idx'][gt_idx, :]
+                        gt_idx_array[i, k] = gt_idx
                         sample_corner_type[i, k] = batch_open_gt_type[i, gt_idx][0]
                         # one-hot encoding
                         sample_corner_type_one_hot[i, k, ...] = np.eye(n_values, dtype = np.int16)[batch_open_gt_type[i, gt_idx][0]]
@@ -1147,6 +1773,7 @@ class NetworkTrainer:
                     elif (np.flip(sample_pair_idx[i][k]) == batch_open_gt_pair_idx[i, :, :]).all(axis = 1).any():
                         gt_idx = np.where((np.flip(sample_pair_idx[i][k]) == batch_open_gt_pair_idx[i, :, :]).all(axis = 1))[0]
                         sample_corner_type[i, k] = batch_open_gt_type[i, gt_idx][0]
+                        gt_idx_array[i, k] = gt_idx
                         sample_corner_type_one_hot[i, k, ...] = np.eye(n_values, dtype = np.int16)[batch_open_gt_type[i, gt_idx][0]]
                         # my_mat[0, 0]['open_gt_256_64_idx'][gt_idx, :]
                         mask = np.in1d(sample_256_64_idx[i][k], batch_open_gt_256_64_idx[i, :, :][gt_idx])
@@ -1163,6 +1790,7 @@ class NetworkTrainer:
                         gt_indices = np.where((distance < np.array([dist_threshold, dist_threshold])).all(axis = 1))[0]
                         gt_idx = gt_indices[np.argmin(distance[gt_indices, :].mean(axis = 1))]
                         sample_corner_type[i, k] = batch_open_gt_type[i, gt_idx][0]
+                        gt_idx_array[i, k] = gt_idx
                         sample_corner_type_one_hot[i, k, ...] = np.eye(n_values, dtype = np.int16)[batch_open_gt_type[i, gt_idx][0]]
                         mask = np.in1d(sample_256_64_idx[i][k], batch_open_gt_256_64_idx[i, :, :][gt_idx])
                         mask[0], mask[-1] = True, True
@@ -1176,6 +1804,7 @@ class NetworkTrainer:
                         gt_indices = np.where((distance < np.array([dist_threshold, dist_threshold])).all(axis = 1))[0]
                         gt_idx = gt_indices[np.argmin(distance[gt_indices, :].mean(axis = 1))]
                         sample_corner_type[i, k] = batch_open_gt_type[i, gt_idx][0]
+                        gt_idx_array[i, k] = gt_idx
                         sample_corner_type_one_hot[i, k, ...] = np.eye(n_values, dtype = np.int16)[batch_open_gt_type[i, gt_idx][0]]
                         mask = np.in1d(sample_256_64_idx[i][k], batch_open_gt_256_64_idx[i, :, :][gt_idx])
                         mask[0], mask[-1] = True, True
@@ -1189,4 +1818,4 @@ class NetworkTrainer:
                     sample_corner_type_one_hot[i, k, ...] = np.eye(n_values, dtype = np.int16)[batch_open_gt_type[i, gt_idx][0]]
                     k = k+1
         
-        return sample_valid_mask_256_64_labels_for_loss.reshape((-1, 64)), sample_valid_mask_pair_labels_for_loss.reshape(-1, 1), sample_corner_type.reshape(-1), sample_corner_type_one_hot.reshape(-1, 4)
+        return sample_valid_mask_256_64_labels_for_loss.reshape((-1, 64)), sample_valid_mask_pair_labels_for_loss.reshape(-1, 1), sample_corner_type.reshape(-1), sample_corner_type_one_hot.reshape(-1, 4), gt_idx_array
