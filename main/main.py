@@ -20,6 +20,7 @@ ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
 sys.path.append(os.path.join(ROOT_DIR, 'utils'))
+os.environ["CUDA_VISIBLE_DEVICES"]="7"
 
 import provider
 import tf_util
@@ -32,7 +33,7 @@ parser.add_argument('--stage_1_log_dir', default='stage_1_log', help='Log dir [d
 parser.add_argument('--stage_2_log_dir', default='stage_2_log', help='Log dir [default: log]')
 parser.add_argument('--num_point', type=int, default=8096, help='Point Number [default: 2048]')
 parser.add_argument('--max_epoch', type=int, default=200, help='Epoch to run [default: 200]')
-parser.add_argument('--batch_size', type=int, default=32, help='Batch Size during training [default: 32]')
+parser.add_argument('--batch_size', type=int, default=1, help='Batch Size during training [default: 32]')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Initial learning rate [default: 0.001]')
 parser.add_argument('--momentum', type=float, default=0.9, help='Initial learning rate [default: 0.9]')
 parser.add_argument('--optimizer', default='adam', help='adam or momentum [default: adam]')
@@ -157,7 +158,7 @@ def train():
         with tf.device('/cpu:0'):
             if STAGE==1:
                 # remember that reg_{edge, corner}_p is label.
-                pointclouds_pl, labels_edge_p, labels_corner_p, reg_edge_p, reg_corner_p = MODEL.placeholder_inputs(BATCH_SIZE,NUM_POINT)
+                pointclouds_pl, labels_edge_p, labels_corner_p = MODEL.placeholder_inputs(BATCH_SIZE,NUM_POINT)
                 is_training_pl = tf.compat.v1.placeholder(tf.bool, shape=())
                 
                 # Note the global_step=batch parameter to minimize. 
@@ -188,8 +189,8 @@ def train():
                 tower_grads = []
                 pred_labels_edge_p_gpu = []
                 pred_labels_corner_p_gpu = []
-                pred_reg_edge_p_gpu = []
-                pred_reg_corner_p_gpu = []
+                #pred_reg_edge_p_gpu = []
+                #pred_reg_corner_p_gpu = []
                 total_loss_gpu = []
 
                 for i in range(NUM_GPUS):
@@ -201,22 +202,18 @@ def train():
                             ## check if dimension numbers are correct:
                             labels_edge_p_batch = tf.slice(labels_edge_p,[i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
                             labels_corner_p_batch = tf.slice(labels_corner_p,[i*DEVICE_BATCH_SIZE, 0], [DEVICE_BATCH_SIZE, -1])
-                            reg_edge_p_batch = tf.slice(reg_edge_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
-                            reg_corner_p_batch = tf.slice(reg_corner_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
+                            #reg_edge_p_batch = tf.slice(reg_edge_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
+                            #reg_corner_p_batch = tf.slice(reg_corner_p, [i*DEVICE_BATCH_SIZE, 0, 0], [DEVICE_BATCH_SIZE, -1, -1])
 
-                            pred_labels_edge_p, pred_labels_corner_p, pred_reg_edge_p, pred_reg_corner_p = MODEL.get_model_31(pc_batch, is_training_pl,STAGE,bn_decay=bn_decay)
+                            pred_labels_edge_p, pred_labels_corner_p = MODEL.get_model_31(pc_batch, is_training_pl,STAGE,bn_decay=bn_decay)
 
 
                             edge_3_1_loss,   edge_3_1_recall,   edge_3_1_acc,\
-                            corner_3_1_loss, corner_3_1_recall, corner_3_1_acc,\
-                            reg_edge_3_1_loss, reg_corner_3_1_loss, loss = MODEL.get_stage_1_loss(pred_labels_edge_p, \
+                            corner_3_1_loss, corner_3_1_recall, corner_3_1_acc, loss = MODEL.get_stage_1_loss(pred_labels_edge_p, \
                                                                                                 pred_labels_corner_p, \
                                                                                                 labels_edge_p_batch, \
                                                                                                 labels_corner_p_batch, \
-                                                                                                pred_reg_edge_p, \
-                                                                                                pred_reg_corner_p, \
-                                                                                                reg_edge_p_batch, \
-                                                                                                reg_corner_p_batch)
+                                                                                                )
                             '''
                             MODEL.get_stage_1_loss(pred_labels_edge_p, pred_labels_corner_p, labels_edge_p_batch, labels_corner_p_batch, \
                                                     pred_reg_edge_p, pred_reg_corner_p, reg_edge_p_batch, reg_corner_p_batch)
@@ -233,8 +230,8 @@ def train():
                             tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_loss' % (i), corner_3_1_loss)
                             tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_recall' % (i), corner_3_1_recall)
                             tf.compat.v1.summary.scalar('%d_GPU_corner_3_1_acc' % (i), corner_3_1_acc)
-                            tf.compat.v1.summary.scalar('%d_GPU_reg_edge_3_1_loss' % (i), reg_edge_3_1_loss)
-                            tf.compat.v1.summary.scalar('%d_GPU_reg_corner_3_1_loss' % (i), reg_corner_3_1_loss)
+                            #tf.compat.v1.summary.scalar('%d_GPU_reg_edge_3_1_loss' % (i), reg_edge_3_1_loss)
+                            #tf.compat.v1.summary.scalar('%d_GPU_reg_corner_3_1_loss' % (i), reg_corner_3_1_loss)
                             #tf.summary.scalar('labels_type_loss', task_4_loss)
                             #tf.summary.scalar('labels_type_acc', task_4_acc)
                             tf.compat.v1.summary.scalar('%d_GPU_loss'% (i), loss)
@@ -247,15 +244,15 @@ def train():
                             # total_loss = tf.add_n(losses, name='total_loss')
                             pred_labels_edge_p_gpu.append(pred_labels_edge_p)
                             pred_labels_corner_p_gpu.append(pred_labels_corner_p)
-                            pred_reg_edge_p_gpu.append(pred_reg_edge_p)
-                            pred_reg_corner_p_gpu.append(pred_reg_corner_p)
+                            #pred_reg_edge_p_gpu.append(pred_reg_edge_p)
+                            #pred_reg_corner_p_gpu.append(pred_reg_corner_p)
                             total_loss_gpu.append(loss)
                 
                 ## Merge pred and losses from multiple GPUs
                 pred_labels_edge_p = tf.concat(pred_labels_edge_p_gpu, 0)
                 pred_labels_corner_p = tf.concat(pred_labels_corner_p_gpu, 0)
-                pred_reg_edge_p = tf.concat(pred_reg_edge_p_gpu, 0)
-                pred_reg_corner_p = tf.concat(pred_reg_corner_p_gpu, 0)
+                #pred_reg_edge_p = tf.concat(pred_reg_edge_p_gpu, 0)
+                #pred_reg_corner_p = tf.concat(pred_reg_corner_p_gpu, 0)
                 total_loss = tf.reduce_mean(input_tensor = total_loss_gpu)
                 
                 # Get training operator
@@ -326,8 +323,8 @@ def train():
                'labels_edge_p': labels_edge_p,
                'labels_corner_p': labels_corner_p,
                #'labels_direction': labels_direction,
-               'reg_edge_p': reg_edge_p,
-               'reg_corner_p': reg_corner_p,
+               #'reg_edge_p': reg_edge_p,
+               #'reg_corner_p': reg_corner_p,
                #'labels_type': labels_type,
                #'simmat_pl': simmat_pl,
                #'neg_simmat_pl': neg_simmat_pl,
@@ -335,8 +332,8 @@ def train():
                'pred_labels_edge_p': pred_labels_edge_p,                   #  'pred_labels_edge_points'
                'pred_labels_corner_p': pred_labels_corner_p, 
                #'pred_labels_direction': pred_labels_direction,
-               'pred_reg_edge_p': pred_reg_edge_p,   
-               'pred_reg_corner_p': pred_reg_corner_p,
+               #'pred_reg_edge_p': pred_reg_edge_p,   
+               #'pred_reg_corner_p': pred_reg_corner_p,
                #'pred_labels_type': pred_labels_type,
                #'pred_simmat': pred_simmat,
                #'pred_conf': pred_conf_logits,
@@ -346,8 +343,8 @@ def train():
                'corner_3_1_loss': corner_3_1_loss,
                'corner_3_1_recall':corner_3_1_recall,
                'corner_3_1_acc': corner_3_1_acc, 
-               'reg_edge_3_1_loss': reg_edge_3_1_loss,
-               'reg_corner_3_1_loss': reg_corner_3_1_loss,
+               #'reg_edge_3_1_loss': reg_edge_3_1_loss,
+               #'reg_corner_3_1_loss': reg_corner_3_1_loss,
                #'task_2_2_loss': task_2_2_loss,
                #'task_3_loss': task_3_loss,
                #'task_4_loss': task_4_loss,
@@ -398,81 +395,44 @@ def train():
 
 def train_one_epoch_stage_1(sess, ops, train_writer):
     is_training = True
-    train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/train_data/new_train/'), '*.mat')
-    matrix_num = len(train_matrices_names_list)
-    permutation = np.random.permutation(matrix_num)
-    for i in range(len(permutation)//4):
-        load_data_start_time = time.time()
-        loadpath = BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4]]
-        train_data = sio.loadmat(loadpath)['Training_data']
-        load_data_duration = time.time() - load_data_start_time
-        log_string('\t%s: %s load time: %f' % (datetime.now(),loadpath,load_data_duration))
-        for j in range(3):
-            temp_load_data_start_time = time.time()
-            temp_loadpath = BASE_DIR + '/train_data/new_train/'+train_matrices_names_list[permutation[i*4+j+1]]
-            temp_train_data = sio.loadmat(temp_loadpath)['Training_data']
-            temp_load_data_duration = time.time() - temp_load_data_start_time
-            log_string('\t%s: %s load time: %f' % (datetime.now(),temp_loadpath,temp_load_data_duration))
-            train_data = np.concatenate((train_data,temp_train_data),axis = 0)
-            print(train_data.shape)
 
-        #push_eval(train_data, ops, sess, train_writer, is_training)
-        num_data = train_data.shape[0]
-        num_batch = num_data // BATCH_SIZE
-        total_loss = 0.0
-        total_edge_3_1_loss = 0.0
-        total_edge_3_1_recall = 0.0
-        total_edge_3_1_acc = 0.0
-        total_corner_3_1_loss = 0.0
-        total_corner_3_1_recall = 0.0
-        total_corner_3_1_acc = 0.0
-        total_reg_edge_3_1_loss = 0.0
-        total_reg_corner_3_1_loss = 0.0
+    train_data = np.load("/raid/home/hyovin.kwak/PIE-NET/main/tunnel_data/PointCloud8096.npy")
+    corner_label = np.load("/raid/home/hyovin.kwak/PIE-NET/main/tunnel_data/corner_labels.npy")
+    edge_label = np.load("/raid/home/hyovin.kwak/PIE-NET/main/tunnel_data/edge_labels.npy")
+    train_data = np.expand_dims(train_data, axis = 0)
+    corner_label = np.expand_dims(corner_label, axis = 0).astype(np.int32)
+    edge_label = np.expand_dims(edge_label, axis = 0).astype(np.int32)
+
+    print(train_data.shape)
+
+    #push_eval(train_data, ops, sess, train_writer, is_training)
+    num_data = train_data.shape[0]
+    num_batch = 1
+    total_loss = 0.0
+    total_edge_3_1_loss = 0.0
+    total_edge_3_1_recall = 0.0
+    total_edge_3_1_acc = 0.0
+    total_corner_3_1_loss = 0.0
+    total_corner_3_1_recall = 0.0
+    total_corner_3_1_acc = 0.0
 #        total_task_2_2_loss = 0.0
 #        total_task_3_loss = 0.0
 #        total_task_4_loss = 0.0
 #        total_task_4_acc = 0.0
 #        total_task_5_loss = 0.0
 #        total_task_6_loss = 0.0
-        process_start_time = time.time()
-        np.random.shuffle(train_data)
-        for j in range(num_batch):
-            begin_idx = j*BATCH_SIZE
-            end_idx = (j+1)*BATCH_SIZE
-            data_cells = train_data[begin_idx: end_idx,0]
-            batch_inputs = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)  # input point clouds  # original code  =6
-            batch_labels_edge_p = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)  # edge point label 0/1
-            batch_labels_corner_p = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)  # edge point label 0/1
-            #batch_labels_direction = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
-            batch_regression_edge = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)  # each point normal estimation
-            batch_regression_corner = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)
-            #batch_labels_type = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
-            #batch_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
-            #batch_neg_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
-            for cnt in range(BATCH_SIZE):
-                tmp_data = data_cells[cnt]
-                batch_inputs[cnt,:,:] = tmp_data[0,0]['down_sample_point']
-                batch_labels_edge_p[cnt,:] = np.squeeze(tmp_data[0,0]['edge_points_label'])
-                batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data[0,0]['corner_points_label'])
-                #batch_labels_direction[cnt,:] = np.squeeze(tmp_data['motion_direction_class'][0,0])
-                batch_regression_edge[cnt,:,:] = tmp_data[0,0]['edge_points_residual_vector']
-                batch_regression_corner[cnt,:,:] = tmp_data[0,0]['corner_points_residual_vector']
-                #batch_labels_type[cnt,:] = np.squeeze(tmp_data['motion_dof_type'][0,0])
-                #tmp_simmat = tmp_data['similar_matrix'][0,0]
-                #batch_simmat_pl[cnt,:,:] = tmp_simmat + tmp_simmat.T
-                #tmp_neg_simmat = 1 - tmp_simmat
-                #tmp_neg_simmat = tmp_neg_simmat - np.eye(NUM_POINT) 
-                #batch_neg_simmat_pl[cnt,:,:] = tmp_neg_simmat
-            feed_dict = {ops['pointclouds_pl']: batch_inputs,
-                         ops['labels_edge_p']: batch_labels_edge_p,
-                         ops['labels_corner_p']: batch_labels_corner_p,
-                         #ops['labels_direction']: batch_labels_direction,
-                         ops['reg_edge_p']: batch_regression_edge,
-                         ops['reg_corner_p']: batch_regression_corner,
-                         #ops['labels_type']: batch_labels_type,
-                         #ops['simmat_pl']: batch_simmat_pl,
-                         #ops['neg_simmat_pl']: batch_neg_simmat_pl,
-                         ops['is_training_pl']: is_training}
+    process_start_time = time.time()
+    for j in range(num_batch):
+        feed_dict = {ops['pointclouds_pl']: train_data,
+                        ops['labels_edge_p']: edge_label,
+                        ops['labels_corner_p']: corner_label,
+                        #ops['labels_direction']: batch_labels_direction,
+                        #ops['reg_edge_p']: batch_regression_edge,
+                        #ops['reg_corner_p']: batch_regression_corner,
+                        #ops['labels_type']: batch_labels_type,
+                        #ops['simmat_pl']: batch_simmat_pl,
+                        #ops['neg_simmat_pl']: batch_neg_simmat_pl,
+                        ops['is_training_pl']: is_training}
                  
                     
 #            summary, step, _, task_1_loss_val,task_1_recall_val,task_1_acc_val,task_2_1_loss_val,task_2_1_acc_val,task_2_2_loss_val, \
@@ -481,24 +441,22 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
 #                                 ops['train_op'], ops['task_1_loss'], ops['task_1_recall'],ops['task_1_acc'],ops['task_2_1_loss'], \
 #                                 ops['task_2_1_acc'],ops['task_2_2_loss'],ops['task_3_loss'],ops['task_4_loss'], \
 #                                 ops['task_4_acc'],ops['task_5_loss'],ops['task_6_loss'],ops['loss']],feed_dict=feed_dict)
-            summary, step, _, edge_3_1_loss_val, edge_3_1_recall_val, edge_3_1_acc_val, \
-            corner_3_1_loss_val, corner_3_1_recall_val, corner_3_1_acc_val, \
-                reg_edge_3_1_loss_val, reg_corner_3_1_loss_val, loss_val = \
-                sess.run([ops['merged'], ops['step'], ops['train_op'], \
-                    ops['edge_3_1_loss'], ops['edge_3_1_recall'], ops['edge_3_1_acc'],\
-                    ops['corner_3_1_loss'], ops['corner_3_1_recall'], ops['corner_3_1_acc'],\
-                    ops['reg_edge_3_1_loss'], ops['reg_corner_3_1_loss'], ops['loss']],feed_dict=feed_dict)
+        summary, step, _, edge_3_1_loss_val, edge_3_1_recall_val, edge_3_1_acc_val, \
+        corner_3_1_loss_val, corner_3_1_recall_val, corner_3_1_acc_val, \
+            loss_val = \
+            sess.run([ops['merged'], ops['step'], ops['train_op'], \
+                ops['edge_3_1_loss'], ops['edge_3_1_recall'], ops['edge_3_1_acc'],\
+                ops['corner_3_1_loss'], ops['corner_3_1_recall'], ops['corner_3_1_acc'],\
+                ops['loss']],feed_dict=feed_dict)
             
-            train_writer.add_summary(summary, step)
-            total_loss += loss_val
-            total_edge_3_1_loss += edge_3_1_loss_val
-            total_edge_3_1_acc += edge_3_1_acc_val
-            total_edge_3_1_recall += edge_3_1_recall_val
-            total_corner_3_1_loss += corner_3_1_loss_val
-            total_corner_3_1_acc += corner_3_1_acc_val
-            total_corner_3_1_recall += corner_3_1_recall_val
-            total_reg_edge_3_1_loss += reg_edge_3_1_loss_val
-            total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
+        train_writer.add_summary(summary, step)
+        total_loss += loss_val
+        total_edge_3_1_loss += edge_3_1_loss_val
+        total_edge_3_1_acc += edge_3_1_acc_val
+        total_edge_3_1_recall += edge_3_1_recall_val
+        total_corner_3_1_loss += corner_3_1_loss_val
+        total_corner_3_1_acc += corner_3_1_acc_val
+        total_corner_3_1_recall += corner_3_1_recall_val
 #            total_task_2_1_loss += task_2_1_loss_val
 #            total_task_2_1_acc += task_2_1_acc_val
 #            total_task_2_2_loss += task_2_2_loss_val
@@ -508,15 +466,13 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
 #            total_task_5_loss += task_5_loss_val
 #            total_task_6_loss += task_6_loss_val
             #print('loss: %f' % loss_val)
-        total_loss = total_loss * 1.0 / num_batch
-        total_edge_3_1_loss = total_edge_3_1_loss * 1.0 / num_batch
-        total_edge_3_1_acc = total_edge_3_1_acc * 1.0 / num_batch
-        total_edge_3_1_recall = total_edge_3_1_recall * 1.0 / num_batch
-        total_corner_3_1_loss = total_corner_3_1_loss * 1.0 / num_batch
-        total_corner_3_1_acc = total_corner_3_1_acc * 1.0 / num_batch
-        total_corner_3_1_recall = total_corner_3_1_recall * 1.0 / num_batch
-        total_reg_edge_3_1_loss = total_reg_edge_3_1_loss * 1.0 / num_batch
-        total_reg_corner_3_1_loss = total_reg_corner_3_1_loss * 1.0 / num_batch
+    total_loss = total_loss * 1.0 / num_batch
+    total_edge_3_1_loss = total_edge_3_1_loss * 1.0 / num_batch
+    total_edge_3_1_acc = total_edge_3_1_acc * 1.0 / num_batch
+    total_edge_3_1_recall = total_edge_3_1_recall * 1.0 / num_batch
+    total_corner_3_1_loss = total_corner_3_1_loss * 1.0 / num_batch
+    total_corner_3_1_acc = total_corner_3_1_acc * 1.0 / num_batch
+    total_corner_3_1_recall = total_corner_3_1_recall * 1.0 / num_batch
 #        total_task_2_1_loss = total_task_2_1_loss * 1.0 / num_batch
 #        total_task_2_1_acc = total_task_2_1_acc * 1.0 / num_batch
 #        total_task_2_2_loss = total_task_2_2_loss * 1.0 / num_batch
@@ -525,19 +481,17 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
 #        total_task_4_acc = total_task_4_acc * 1.0 / num_batch
 #        total_task_5_loss = total_task_5_loss * 1.0 / num_batch
 #        total_task_6_loss = total_task_6_loss * 1.0 / num_batch
-        process_duration = time.time() - process_start_time
-        examples_per_sec = num_data/process_duration
-        sec_per_batch = process_duration/num_batch
-        log_string('\t%s: step: %f loss: %f duration time %.3f (%.1f examples/sec; %.3f sec/batch)' \
-           % (datetime.now(),step,total_loss,process_duration,examples_per_sec,sec_per_batch))
-        log_string('\t\tTraining Edge_3_1 Mean_Loss: %f' % total_edge_3_1_loss)
-        log_string('\t\tTraining Edge_3_1 Mean_Accuracy: %f' % total_edge_3_1_acc)
-        log_string('\t\tTraining Edge_3_1 Mean_Recall: %f' % total_edge_3_1_recall)
-        log_string('\t\tTraining Corner_3_1 Mean_Loss: %f' % total_corner_3_1_loss)
-        log_string('\t\tTraining Corner_3_1 Mean_Accuracy: %f' % total_corner_3_1_acc)
-        log_string('\t\tTraining Corner_3_1 Mean_Recall: %f' % total_corner_3_1_recall)
-        log_string('\t\tTraining Reg_Edge_3_1 Mean_Loss: %f' % total_reg_edge_3_1_loss)
-        log_string('\t\tTraining Reg_Corner_3_1 Mean_Loss: %f' % total_reg_corner_3_1_loss)
+    process_duration = time.time() - process_start_time
+    examples_per_sec = num_data/process_duration
+    sec_per_batch = process_duration/num_batch
+    log_string('\t%s: step: %f loss: %f duration time %.3f (%.1f examples/sec; %.3f sec/batch)' \
+        % (datetime.now(),step,total_loss,process_duration,examples_per_sec,sec_per_batch))
+    log_string('\t\tTraining Edge_3_1 Mean_Loss: %f' % total_edge_3_1_loss)
+    log_string('\t\tTraining Edge_3_1 Mean_Accuracy: %f' % total_edge_3_1_acc)
+    log_string('\t\tTraining Edge_3_1 Mean_Recall: %f' % total_edge_3_1_recall)
+    log_string('\t\tTraining Corner_3_1 Mean_Loss: %f' % total_corner_3_1_loss)
+    log_string('\t\tTraining Corner_3_1 Mean_Accuracy: %f' % total_corner_3_1_acc)
+    log_string('\t\tTraining Corner_3_1 Mean_Recall: %f' % total_corner_3_1_recall)
 #        log_string('\t\tTraining TASK 2_1 Mean_loss: %f' % total_task_2_1_loss)
 #        log_string('\t\tTraining TASK 2_1 Accuracy: %f' % total_task_2_1_acc)
 #        log_string('\t\tTraining TASK 2_2 Mean_loss: %f' % total_task_2_2_loss)
@@ -550,17 +504,17 @@ def train_one_epoch_stage_1(sess, ops, train_writer):
 
 def eval_one_epoch(sess, ops, test_writer):
     """ ops: dict mapping from string to tf ops """
-    train_or_test = "EVAL"
-    is_training = False
-    #log_string(str(datetime.now()))
-    #log_string('---- EPOCH %03d EVALUATION ----'%(EPOCH_CNT))
-    # just use one matrix.
-    test_matrices_name = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '40.mat')
-    loadpath = BASE_DIR + '/test_data/new_test/'+test_matrices_name[0]
-    test_data = sio.loadmat(loadpath)['Training_data']
+    is_training = True
+    train_data = np.load("/raid/home/hyovin.kwak/PIE-NET/main/tunnel_data/PointCloud8096.npy")
+    corner_label = np.load("/raid/home/hyovin.kwak/PIE-NET/main/tunnel_data/corner_labels.npy")
+    edge_label = np.load("/raid/home/hyovin.kwak/PIE-NET/main/tunnel_data/edge_labels.npy")
+    train_data = np.expand_dims(train_data, axis = 0)
+    corner_label = np.expand_dims(corner_label, axis = 0).astype(np.int32)
+    edge_label = np.expand_dims(edge_label, axis = 0).astype(np.int32)
 
-    num_data = test_data.shape[0]  # num_data = 64
-    num_batch = num_data // BATCH_SIZE # num_batch = 2
+
+    num_data = train_data.shape[0]  # num_data = 64
+    num_batch = 1
     total_loss = 0.0
     total_edge_3_1_loss = 0.0
     total_edge_3_1_recall = 0.0
@@ -579,50 +533,19 @@ def eval_one_epoch(sess, ops, test_writer):
     process_start_time = time.time()
     pred_labels_edge_p_val = np.zeros((num_data, NUM_POINT, 2), np.float32)
     pred_labels_corner_p_val = np.zeros((num_data, NUM_POINT, 2), np.float32)
-    pred_reg_edge_p_val = np.zeros((num_data, NUM_POINT, 3), np.float32)
-    pred_reg_corner_p_val = np.zeros((num_data, NUM_POINT, 3), np.float32)
+    #pred_reg_edge_p_val = np.zeros((num_data, NUM_POINT, 3), np.float32)
+    #pred_reg_corner_p_val = np.zeros((num_data, NUM_POINT, 3), np.float32)
     input_labels_edge_p = np.zeros((num_data,NUM_POINT),np.int32)
     input_labels_corner_p = np.zeros((num_data,NUM_POINT),np.int32)
 
-    np.random.shuffle(test_data)
     for j in range(num_batch):
-        begin_idx = j*BATCH_SIZE
-        end_idx = (j+1)*BATCH_SIZE
-        data_cells = test_data[begin_idx: end_idx,0]
-        batch_inputs = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)  # input point clouds  # original code  =6
-        batch_labels_edge_p = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)  # edge point label 0/1
-        batch_labels_corner_p = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)  # edge point label 0/1
-        #batch_labels_direction = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
-        batch_regression_edge = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)  # each point normal estimation
-        batch_regression_corner = np.zeros((BATCH_SIZE,NUM_POINT,3),np.float32)
-        #batch_labels_type = np.zeros((BATCH_SIZE,NUM_POINT),np.int32)
-        #batch_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
-        #batch_neg_simmat_pl = np.zeros((BATCH_SIZE, NUM_POINT, NUM_POINT), np.float32)
-        for cnt in range(BATCH_SIZE):
-            tmp_data = data_cells[cnt]
-            batch_inputs[cnt,:,:] = tmp_data[0,0]['down_sample_point']
-            
-            batch_labels_edge_p[cnt,:] = np.squeeze(tmp_data[0,0]['edge_points_label'])
-            input_labels_edge_p[begin_idx+cnt, :] = np.squeeze(tmp_data[0,0]['edge_points_label'])
-            
-            batch_labels_corner_p[cnt,:] = np.squeeze(tmp_data[0,0]['corner_points_label'])
-            input_labels_corner_p[begin_idx+cnt, :] = np.squeeze(tmp_data[0,0]['corner_points_label'])
 
-            #batch_labels_direction[cnt,:] = np.squeeze(tmp_data['motion_direction_class'][0,0])
-            batch_regression_edge[cnt,:,:] = tmp_data[0,0]['edge_points_residual_vector']
-            batch_regression_corner[cnt,:,:] = tmp_data[0,0]['corner_points_residual_vector']
-            #batch_labels_type[cnt,:] = np.squeeze(tmp_data['motion_dof_type'][0,0])
-            #tmp_simmat = tmp_data['similar_matrix'][0,0]
-            #batch_simmat_pl[cnt,:,:] = tmp_simmat + tmp_simmat.T
-            #tmp_neg_simmat = 1 - tmp_simmat
-            #tmp_neg_simmat = tmp_neg_simmat - np.eye(NUM_POINT) 
-            #batch_neg_simmat_pl[cnt,:,:] = tmp_neg_simmat
-        feed_dict = {ops['pointclouds_pl']: batch_inputs,
-                    ops['labels_edge_p']: batch_labels_edge_p,
-                    ops['labels_corner_p']: batch_labels_corner_p,
+        feed_dict = {ops['pointclouds_pl']: train_data,
+                    ops['labels_edge_p']: edge_label,
+                    ops['labels_corner_p']: corner_label,
                     #ops['labels_direction']: batch_labels_direction,
-                    ops['reg_edge_p']: batch_regression_edge,
-                    ops['reg_corner_p']: batch_regression_corner,
+                    #ops['reg_edge_p']: batch_regression_edge,
+                    #ops['reg_corner_p']: batch_regression_corner,
                     #ops['labels_type']: batch_labels_type,
                     #ops['simmat_pl']: batch_simmat_pl,
                     #ops['neg_simmat_pl']: batch_neg_simmat_pl,
@@ -638,15 +561,12 @@ def eval_one_epoch(sess, ops, test_writer):
         summary, step, _, \
         edge_3_1_loss_val, edge_3_1_recall_val, edge_3_1_acc_val, \
         corner_3_1_loss_val, corner_3_1_recall_val, corner_3_1_acc_val, \
-        reg_edge_3_1_loss_val, reg_corner_3_1_loss_val, loss_val, \
-        pred_labels_edge_p_val[begin_idx:end_idx,:,:], pred_labels_corner_p_val[begin_idx:end_idx,:,:], \
-        pred_reg_edge_p_val[begin_idx:end_idx,:,:], pred_reg_corner_p_val[begin_idx:end_idx,:,:] = \
-            sess.run([ops['merged'], ops['step'], ops['train_op'], \
-                ops['edge_3_1_loss'], ops['edge_3_1_recall'], ops['edge_3_1_acc'],\
-                ops['corner_3_1_loss'], ops['corner_3_1_recall'], ops['corner_3_1_acc'],\
-                ops['reg_edge_3_1_loss'], ops['reg_corner_3_1_loss'], ops['loss'], \
-                ops['pred_labels_edge_p'], ops['pred_labels_corner_p'], \
-                ops['pred_reg_edge_p'], ops['pred_reg_corner_p']],feed_dict=feed_dict)
+        loss_val, \
+        pred_labels_edge_p_val[0,:,:], pred_labels_corner_p_val[0,:,:] = \
+        sess.run([ops['merged'], ops['step'], ops['train_op'], \
+            ops['edge_3_1_loss'], ops['edge_3_1_recall'], ops['edge_3_1_acc'],\
+            ops['corner_3_1_loss'], ops['corner_3_1_recall'], ops['corner_3_1_acc'], ops['loss'], \
+            ops['pred_labels_edge_p'], ops['pred_labels_corner_p']],feed_dict=feed_dict)
                 
         test_writer.add_summary(summary, step)
         total_loss += loss_val
@@ -656,8 +576,8 @@ def eval_one_epoch(sess, ops, test_writer):
         total_corner_3_1_loss += corner_3_1_loss_val
         total_corner_3_1_acc += corner_3_1_acc_val
         total_corner_3_1_recall += corner_3_1_recall_val
-        total_reg_edge_3_1_loss += reg_edge_3_1_loss_val
-        total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
+        #total_reg_edge_3_1_loss += reg_edge_3_1_loss_val
+        #total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
     #            total_task_2_1_loss += task_2_1_loss_val
     #            total_task_2_1_acc += task_2_1_acc_val
     #            total_task_2_2_loss += task_2_2_loss_val
@@ -689,14 +609,14 @@ def eval_one_epoch(sess, ops, test_writer):
     sec_per_batch = process_duration/num_batch
     log_string('\t%s: step: %f loss: %f duration time %.3f (%.1f examples/sec; %.3f sec/batch)' \
     % (datetime.now(),step,total_loss,process_duration,examples_per_sec,sec_per_batch))
-    log_string('\t\t%s Edge_3_1 Mean_Loss: %f' % (train_or_test, total_edge_3_1_loss))
-    log_string('\t\t%s Edge_3_1 Mean_Accuracy: %f' % (train_or_test, total_edge_3_1_acc))
-    log_string('\t\t%s Edge_3_1 Mean_Recall: %f' % (train_or_test, total_edge_3_1_recall))
-    log_string('\t\t%s Corner_3_1 Mean_Loss: %f' % (train_or_test, total_corner_3_1_loss))
-    log_string('\t\t%s Corner_3_1 Mean_Accuracy: %f' % (train_or_test, total_corner_3_1_acc))
-    log_string('\t\t%s Corner_3_1 Mean_Recall: %f' % (train_or_test, total_corner_3_1_recall))
-    log_string('\t\t%s Reg_Edge_3_1 Mean_Loss: %f' % (train_or_test, total_reg_edge_3_1_loss))
-    log_string('\t\t%s Reg_Corner_3_1 Mean_Loss: %f' % (train_or_test, total_reg_corner_3_1_loss))
+    log_string('\t\t%s Edge_3_1 Mean_Loss: %f' % ("eval", total_edge_3_1_loss))
+    log_string('\t\t%s Edge_3_1 Mean_Accuracy: %f' % ("eval", total_edge_3_1_acc))
+    log_string('\t\t%s Edge_3_1 Mean_Recall: %f' % ("eval", total_edge_3_1_recall))
+    log_string('\t\t%s Corner_3_1 Mean_Loss: %f' % ("eval", total_corner_3_1_loss))
+    log_string('\t\t%s Corner_3_1 Mean_Accuracy: %f' % ("eval", total_corner_3_1_acc))
+    log_string('\t\t%s Corner_3_1 Mean_Recall: %f' % ("eval", total_corner_3_1_recall))
+    log_string('\t\t%s Reg_Edge_3_1 Mean_Loss: %f' % ("eval", total_reg_edge_3_1_loss))
+    log_string('\t\t%s Reg_Corner_3_1 Mean_Loss: %f' % ("eval", total_reg_corner_3_1_loss))
 
 
     #        log_string('\t\tTraining TASK 2_1 Mean_loss: %f' % total_task_2_1_loss)
@@ -707,13 +627,18 @@ def eval_one_epoch(sess, ops, test_writer):
     #        log_string('\t\tTraining TASK 4 Accuracy: %f' % total_task_4_acc)
     #        log_string('\t\tTraining TASK 5 Mean_loss: %f' % total_task_5_loss)
     #        log_string('\t\tTraining TASK 6 Mean_loss: %f' % total_task_6_loss)
-    sio.savemat('./test_result/test_pred_'+test_matrices_name[0], {'input_point_cloud': test_data, \
+    np.save("./pred_labels_edge_p_val.npy", pred_labels_edge_p_val)
+    np.save("./pred_labels_corner_p_val.npy", pred_labels_corner_p_val)
+    
+
+    '''
+    sio.savemat('./test_result/test_pred_'+"prototyp.mat", {'input_point_cloud': train_data, \
                                                 'labels_edge_p': input_labels_edge_p, \
                                                 'labels_corner_p': input_labels_corner_p, \
                                                 'pred_labels_edge_p': pred_labels_edge_p_val, \
                                                 'pred_labels_corner_p': pred_labels_corner_p_val, \
-                                                'pred_reg_edge_p': pred_reg_edge_p_val, \
-                                                'pred_reg_corner_p': pred_reg_corner_p_val})
+                                                })
+    '''
 
 
 
