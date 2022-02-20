@@ -993,6 +993,13 @@ class NetworkTrainer:
                 pred_labels_corner_p_val_softmax = ssp.softmax(pred_labels_corner_p_val[begin_idx:end_idx,:,:], axis = 2)
                 sample_points_pl, idx_B_256_64, idx_pair, mask_1_if_proposed, mask_256_64_candidates_proposed, pairs_available = self.corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val_softmax)
 
+                # save them and visualize locally:
+                # sample_points_pl: list, (BATCH_SIZE, 256, 64, 3)
+                # sample_points_pl, idx_B_256_64, idx_pair, mask_1_if_proposed, mask_256_64_candidates_proposed, pairs_available
+                # make sure they are all np.arrays!
+
+
+
                 # open_gt_labels_pair: "it has to be 0 labeled if it is not a corner, although it is proposed."
                 # open_gt_labels_pair_1_if_proposed_anyway: "proposed? ok it is 1 no matter what"
                 #
@@ -1643,7 +1650,7 @@ class NetworkTrainer:
 
         # per batch sample the points
         idx_B_256_64 = []
-        points_B_256_64_3 = [] # (8, 256, 64, 3)
+        points_B_256_64_3 = [] # (BATCH_SIZE, 256, 64, 3)
         valid_mask_256_64_per_batch = []
         for per_batch in range(self.BATCH_SIZE):
             rest_num = 256
