@@ -746,7 +746,7 @@ class NetworkTrainer:
             # load graph_31
             init_31 = tf.compat.v1.global_variables_initializer()
             self.sess_31.run(init_31)
-            self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_498.ckpt')
+            self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_100.ckpt')
             # build train ops
             self.train_ops_31 = {'pointclouds_pl': self.pointclouds_pl,
                                 'labels_edge_p': self.labels_edge_p,
@@ -989,6 +989,14 @@ class NetworkTrainer:
                     total_reg_edge_3_1_loss += reg_edge_3_1_loss_val
                     total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
 
+                # section 3.1.
+                np.save(os.path.join(self.BASE_DIR, 's31_batch_inputs.npy'), batch_inputs)
+                np.save(os.path.join(self.BASE_DIR, 's31_pred_labels_edge_p_val.npy'), pred_labels_edge_p_val[begin_idx:end_idx,:,:])
+                np.save(os.path.join(self.BASE_DIR, 's31_pred_labels_corner_p_val.npy'), pred_labels_corner_p_val[begin_idx:end_idx,:,:])
+                np.save(os.path.join(self.BASE_DIR, 's31_pred_reg_edge_p_val.npy'), pred_reg_edge_p_val[begin_idx:end_idx,:,:])
+                np.save(os.path.join(self.BASE_DIR, 's31_pred_reg_corner_p_val.npy'), pred_reg_corner_p_val[begin_idx:end_idx,:,:])
+
+
                 # here takes the post processing place.
                 pred_labels_corner_p_val_softmax = ssp.softmax(pred_labels_corner_p_val[begin_idx:end_idx,:,:], axis = 2)
                 sample_points_pl, idx_B_256_64, idx_pair, mask_1_if_proposed, mask_256_64_candidates_proposed, pairs_available = self.corner_pair_neighbor_search(batch_inputs, pred_labels_corner_p_val_softmax)
@@ -997,6 +1005,13 @@ class NetworkTrainer:
                 # sample_points_pl: list, (BATCH_SIZE, 256, 64, 3)
                 # sample_points_pl, idx_B_256_64, idx_pair, mask_1_if_proposed, mask_256_64_candidates_proposed, pairs_available
                 # make sure they are all np.arrays!
+                
+                # visualize s31p1
+                np.save(os.path.join(self.BASE_DIR, 's31p1_sample_points_pl.npy'), sample_points_pl)
+                np.save(os.path.join(self.BASE_DIR, 's31p1_idx_B_256_64.npy'), idx_B_256_64)
+                np.save(os.path.join(self.BASE_DIR, 's31p1_idx_pair.npy'), idx_pair)
+                np.save(os.path.join(self.BASE_DIR, 's31p1_mask_1_if_proposed.npy'), mask_1_if_proposed)
+                np.save(os.path.join(self.BASE_DIR, 's31p1_mask_256_64_candidates_proposed.npy'), mask_256_64_candidates_proposed)
 
 
 
@@ -1029,6 +1044,12 @@ class NetworkTrainer:
                 mask_256_64_candidates_proposed = mask_256_64_candidates_proposed.astype(np.int32)
                 mask_1_if_edge = mask_1_if_edge.astype(np.int32)
                 mask_1_if_proposed = mask_1_if_proposed.astype(np.int32)
+
+                # visualize s31p2
+                np.save(os.path.join(self.BASE_DIR, 's31p2_labels_256_64_edge.npy'), labels_256_64_edge)
+                np.save(os.path.join(self.BASE_DIR, 's31p2_mask_1_if_edge.npy'), mask_1_if_edge)
+                np.save(os.path.join(self.BASE_DIR, 's31p2_labels_type.npy'), labels_type)
+
 
                 with self.graph_32.as_default():
                     feed_dict = {self.train_ops_32['sample_points_pl']: sample_points_pl,\

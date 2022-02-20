@@ -33,7 +33,7 @@ parser.add_argument('--stage_1_log_dir', default='stage_1_log', help='Log dir [d
 parser.add_argument('--stage_2_log_dir', default='stage_2_log', help='Log dir [default: log]')
 parser.add_argument('--stage_3_log_dir', default='stage_3_log', help='Log dir [default: log]')
 parser.add_argument('--num_point', type=int, default=8096, help='Point Number [default: 2048]')
-parser.add_argument('--max_epoch', type=int, default=500, help='Epoch to run [default: 251]')
+parser.add_argument('--max_epoch', type=int, default=100, help='Epoch to run [default: 251]')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch Size during training [default: 32]')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Initial learning rate [default: 0.001]')
 parser.add_argument('--momentum', type=float, default=0.9, help='Initial learning rate [default: 0.9]')
