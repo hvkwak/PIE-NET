@@ -4,6 +4,7 @@ BASE_DIR = os.path.dirname(__file__)
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, '../utils'))
 import tensorflow as tf
+import scipy.interpolate as interpolate
 import numpy as np
 import tf_util
 from pointnet_util import pointnet_sa_module, pointnet_fp_module
@@ -16,6 +17,28 @@ Chamfer_Distance_func = lambda x: tf.reduce_min(tf.sqrt(tf.reduce_sum((tf.expand
 
 # Param_Line_Func (We ignore Batch Dimensions. x[0] = x[ignored, 0, ...])
 Param_Line_Func = lambda x: tf.concat([tf.expand_dims(x[0], axis = 0), x[0]+(x[1]-x[0])*tf.random.uniform(shape=(62,1), minval=0, maxval=1, dtype=tf.dtypes.float32, seed=None, name=None), tf.expand_dims(x[1], axis = 0)], axis =0)
+
+#Bspline_Func = lambda x: tf.numpy_function(interpolate.splev, [tf.cast(tf.linspace(0, 1, 64), tf.float32), [tf.concat([[0.0, 0.0, 0.0], tf.cast(tf.linspace(0, 1, x[0].shape[0]-2), tf.float32), [1.0, 1.0, 1.0]], axis = 0), [x[..., 0], x[..., 1], x[..., 2]], 3]], tf.float32)
+
+
+
+def Bspline_Func(inp):
+    print("......", inp.shape)
+    tf.print(inp.shape)
+    #inp = tf.constant([[(3, 1, 0), (2.5, 4, 0.25), (0, 1, 0.5), (-2.5, 4, 0.75),(-3, 0, 1)]])
+    x = inp[..., 0]
+    y = inp[..., 1]
+    z = inp[..., 2]
+    l = x.shape[0]
+    t = tf.cast(tf.linspace(0, 1, l-2), tf.float32)
+    t = tf.cast(tf.concat([[0.0, 0.0, 0.0], t, [1.0, 1.0, 1.0]], axis = 0), tf.float32)
+    tck = [t.nump, [tf.expand_dims(x, axis = 0), tf.expand_dims(y, axis = 0), tf.expand_dims(z, axis = 0)], tf.constant(3)]
+    u3 = tf.cast(tf.linspace(0, 1, 64), tf.float32)
+    print("......", u3.shape)
+    print("......", tck)
+
+    npx=tf.py_function(interpolate.splev, [u3, tck], tf.float32)
+    return tf.stack(npx, axis = 1)
 
 
 # Chamfer Distance Implementation from: https://stackoverflow.com/questions/47060685/chamfer-distance-between-two-point-clouds-in-tensorflow/54767428
@@ -198,9 +221,13 @@ def get_model_32(point_cloud, is_training, bn_decay=None):
                                   scope='stage2/reg/fc2', bn_decay=bn_decay)
     regression_head = tf_util.dropout(regression_head, keep_prob=0.7, is_training=is_training,
                           scope='stage2/reg/dp2')
-    pred_open_curve_reg = tf_util.fully_connected(regression_head, 6, activation_fn=None, scope='stage2/reg/fc3') # 3 coordinates
-    
-    return pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg, end_points
+
+    pred_open_curve_reg_BSpline = tf_util.fully_connected(regression_head, 15, activation_fn=None, scope='stage2/reg/fc3_0') # 3 coordinates
+
+    # two points
+    pred_open_curve_reg_line = tf_util.fully_connected(regression_head, 6, activation_fn=None, scope='stage2/reg/fc3_1') # 3 coordinates
+
+    return pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg_BSpline, pred_open_curve_reg_line, end_points
     
 
 def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
@@ -290,7 +317,8 @@ def get_model_31(point_cloud, is_training, STAGE, bn_decay=None):
 
 def get_stage_2_loss(pred_open_curve_seg, \
                      pred_open_curve_cls,\
-                     pred_open_curve_reg,\
+                     pred_open_curve_reg_Line,\
+                     pred_open_curve_reg_BSpline,\
                      batch_labels_256_64, \
                      batch_mask_256_64_candidates, \
                      batch_mask_1_if_corner, \
@@ -353,22 +381,23 @@ def get_stage_2_loss(pred_open_curve_seg, \
 
     # note that pred_open_curve_reg is (8192, 6)
     #batch_sample_points_pl = tf.cast(batch_sample_points_pl, dtype = tf.float32)
-    pred_open_curve_reg = tf.cast(tf.reshape(pred_open_curve_reg, (num_corner_pairs, 2, 3)), dtype = tf.float32)
-    pred_open_curve_reg_lines = tf.map_fn(fn = Param_Line_Func, elems = pred_open_curve_reg, dtype=tf.float32, back_prop = True)
+    pred_open_curve_reg_Line = tf.cast(tf.reshape(pred_open_curve_reg_Line, (num_corner_pairs, 2, 3)), dtype = tf.float32)
+    pred_open_curve_reg_Lines = tf.map_fn(fn = Param_Line_Func, elems = pred_open_curve_reg_Line, dtype=tf.float32, back_prop = True)
+    Chamfer_Distance_reg_Lines = tf.map_fn(fn = Chamfer_Distance_func, elems = (batch_sample_points_pl, pred_open_curve_reg_Lines), dtype=tf.float32, back_prop=True)
 
-    #pred_open_curve_seg_mask = tf.cast(tf.equal(tf.argmax(pred_open_curve_seg, axis = 2), 1), dtype = tf.float32)
-    #pred_open_curve_cls_mask = tf.expand_dims(tf.cast(tf.equal(tf.argmax(pred_open_curve_cls, axis = 1), 2), dtype = tf.float32), axis = 1)
-    #line_mask = tf.multiply(pred_open_curve_seg_mask, pred_open_curve_cls_mask)
     
+    pred_open_curve_reg_BSpline = tf.cast(tf.reshape(pred_open_curve_reg_BSpline, (num_corner_pairs, 5, 3)), dtype = tf.float32)
+    pred_open_curve_reg_BSplines = tf.map_fn(fn = Bspline_Func, elems = pred_open_curve_reg_BSpline, dtype=tf.float32, back_prop = True)
+    Chamfer_Distance_reg_BSplines = tf.map_fn(fn = Chamfer_Distance_func, elems = (batch_sample_points_pl, pred_open_curve_reg_BSplines), dtype=tf.float32, back_prop=True)
+
+
+
     pred_open_curve_seg_mask = tf.cast(tf.equal(batch_labels_256_64, 1), dtype = tf.float32)
-    pred_open_curve_cls_mask = tf.expand_dims(tf.cast(tf.equal(batch_labels_type, 2), dtype = tf.float32), axis = 1)
-    line_mask = tf.multiply(pred_open_curve_seg_mask, pred_open_curve_cls_mask)
-    
-    #neg_line_mask = tf.ones_like(line_mask) - line_mask 
-    #batch_sample_points_pl_999 = batch_sample_points_pl + tf.expand_dims(neg_line_mask*9999, axis = 2)
-    
-    Chamfer_Distance_reg_lines = tf.map_fn(fn = Chamfer_Distance_func, elems = (batch_sample_points_pl, pred_open_curve_reg_lines), dtype=tf.float32, back_prop=True)
-    
+    pred_open_curve_cls_mask_Line = tf.expand_dims(tf.cast(tf.equal(batch_labels_type, 2), dtype = tf.float32), axis = 1)
+    Line_mask = tf.multiply(pred_open_curve_seg_mask, pred_open_curve_cls_mask_Line)
+
+    pred_open_curve_cls_mask_BSpline = tf.expand_dims(tf.cast(tf.equal(batch_labels_type, 1), dtype = tf.float32), axis = 1)
+    BSpline_mask = tf.multiply(pred_open_curve_seg_mask, pred_open_curve_cls_mask_BSpline)
     #tf.boolean_mask(tensor = batch_sample_points_pl, mask = tf.multiply(pred_open_curve_seg_mask, pred_open_curve_cls_mask))
     #Chamfer_Distance_reg_lines = tf.map_fn(fn = Chamfer_Distance_func, elems = (tf.boolean_mask(tensor = batch_sample_points_pl, mask = tf.multiply(pred_open_curve_seg_mask, pred_open_curve_cls_mask)), pred_open_curve_reg_lines), dtype=tf.float32, back_prop=True)
     #pred_open_curve_cls_line_softmax = tf.nn.softmax(pred_open_curve_cls)
@@ -385,7 +414,9 @@ def get_stage_2_loss(pred_open_curve_seg, \
     #with tf.control_dependencies([print_op2]):
     #    pred_open_curve_cls_line_ones = tf.compat.v1.identity(pred_open_curve_cls_line_ones)
 
-    loss_line = tf.reduce_sum(tf.cast(batch_labels_type_one_hot[:, 2], dtype = tf.float32)*tf.reduce_mean(line_mask*Chamfer_Distance_reg_lines*(mask_256_64*(Nn_256_64/Np_256_64)+1)*(mask_1_if_proposed*(Nn_pair_1_if_proposed/Np_pair_1_if_proposed)+1), axis = 1))
+    loss_line = tf.reduce_sum(tf.cast(batch_labels_type_one_hot[:, 2], dtype = tf.float32)*tf.reduce_mean(Line_mask*Chamfer_Distance_reg_Lines*(mask_256_64*(Nn_256_64/Np_256_64)+1)*(mask_1_if_proposed*(Nn_pair_1_if_proposed/Np_pair_1_if_proposed)+1), axis = 1))
+    loss_BSpline = tf.reduce_sum(tf.cast(batch_labels_type_one_hot[:, 1], dtype = tf.float32)*tf.reduce_mean(BSpline_mask*Chamfer_Distance_reg_BSplines*(mask_256_64*(Nn_256_64/Np_256_64)+1)*(mask_1_if_proposed*(Nn_pair_1_if_proposed/Np_pair_1_if_proposed)+1), axis = 1))
+
     #loss_line = tf.reduce_sum(tf.cast(batch_labels_type_one_hot[:, 2], dtype = tf.float32)*tf.reduce_sum(line_mask*Chamfer_Distance_reg_lines*(mask_256_64*(Nn_256_64/Np_256_64)+1), axis = 1)*(mask_1_if_corner*(Nn_pair_1_if_corner/Np_pair_1_if_corner)+1))
     #loss_line = tf.reduce_sum(tf.cast(batch_labels_type_one_hot[:, 2], dtype = tf.float32)*tf.reduce_sum(line_mask*Chamfer_Distance_reg_lines*(mask_256_64*(Nn_256_64/Np_256_64)+1), axis = 1)*(mask_1_if_corner*(Nn_pair_1_if_corner/Np_pair_1_if_corner)+1))
     #loss_line = tf.reduce_sum(pred_open_curve_cls_line_ones*tf.cast(batch_labels_type_one_hot[:, 2], dtype = tf.float32)*tf.reduce_sum(tf.cast(tf.equal(tf.argmax(pred_open_curve_seg, axis = 2), 1), dtype = tf.float32)*Chamfer_Distance_reg_lines*(mask_256_64*(Nn_256_64/Np_256_64)+1), axis = 1)*(mask_1_if_corner*(Nn_pair_1_if_corner/Np_pair_1_if_corner)+1))
@@ -396,8 +427,8 @@ def get_stage_2_loss(pred_open_curve_seg, \
 
     W_seg = 1.0
     W_cls = 1.0
-    W_reg = 1.0
-    reg_3_2_loss = loss_line
+    W_reg = 10.0
+    reg_3_2_loss = loss_line + loss_BSpline
 
     Loss_proposal = W_seg*seg_3_2_loss + mat_diff_loss*reg_weight + W_cls*cls_3_2_loss + W_reg*reg_3_2_loss
     
