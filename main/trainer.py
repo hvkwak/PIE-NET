@@ -122,7 +122,7 @@ class NetworkTrainer:
                             batch_mask_1_if_proposed = tf.slice(self.mask_1_if_proposed, [i*device_batch_size_3_2,0], [device_batch_size_3_2,-1])
                             batch_labels_type = tf.slice(self.labels_type, [i*device_batch_size_3_2], [device_batch_size_3_2])
                             batch_labels_type_one_hot = tf.slice(self.labels_type_one_hot, [i*device_batch_size_3_2, 0], [device_batch_size_3_2, -1])
-                            pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg_Line, pred_open_curve_reg_BSpline, end_points = self.MODEL.get_model_32(batch_sample_points_pl, self.is_training_32, bn_decay=self.bn_decay_32)
+                            pred_open_curve_seg, pred_open_curve_cls, pred_open_curve_reg_BSpline, pred_open_curve_reg_Line, end_points = self.MODEL.get_model_32(batch_sample_points_pl, self.is_training_32, bn_decay=self.bn_decay_32)
                             
                             loss_32, seg_3_2_loss, cls_3_2_loss, reg_3_2_loss, mat_diff_loss = self.MODEL.get_stage_2_loss(pred_open_curve_seg, \
                                                         pred_open_curve_cls, \
@@ -990,11 +990,11 @@ class NetworkTrainer:
                     total_reg_corner_3_1_loss += reg_corner_3_1_loss_val
 
                 # section 3.1.
-                np.save(os.path.join(self.BASE_DIR, 's31_batch_inputs.npy'), batch_inputs)
-                np.save(os.path.join(self.BASE_DIR, 's31_pred_labels_edge_p_val.npy'), pred_labels_edge_p_val[begin_idx:end_idx,:,:])
-                np.save(os.path.join(self.BASE_DIR, 's31_pred_labels_corner_p_val.npy'), pred_labels_corner_p_val[begin_idx:end_idx,:,:])
-                np.save(os.path.join(self.BASE_DIR, 's31_pred_reg_edge_p_val.npy'), pred_reg_edge_p_val[begin_idx:end_idx,:,:])
-                np.save(os.path.join(self.BASE_DIR, 's31_pred_reg_corner_p_val.npy'), pred_reg_corner_p_val[begin_idx:end_idx,:,:])
+                #np.save(os.path.join(self.BASE_DIR, 's31_batch_inputs.npy'), batch_inputs)
+                #np.save(os.path.join(self.BASE_DIR, 's31_pred_labels_edge_p_val.npy'), pred_labels_edge_p_val[begin_idx:end_idx,:,:])
+                #np.save(os.path.join(self.BASE_DIR, 's31_pred_labels_corner_p_val.npy'), pred_labels_corner_p_val[begin_idx:end_idx,:,:])
+                #np.save(os.path.join(self.BASE_DIR, 's31_pred_reg_edge_p_val.npy'), pred_reg_edge_p_val[begin_idx:end_idx,:,:])
+                #np.save(os.path.join(self.BASE_DIR, 's31_pred_reg_corner_p_val.npy'), pred_reg_corner_p_val[begin_idx:end_idx,:,:])
 
 
                 # here takes the post processing place.
@@ -1007,11 +1007,11 @@ class NetworkTrainer:
                 # make sure they are all np.arrays!
                 
                 # visualize s31p1
-                np.save(os.path.join(self.BASE_DIR, 's31p1_sample_points_pl.npy'), sample_points_pl)
-                np.save(os.path.join(self.BASE_DIR, 's31p1_idx_B_256_64.npy'), idx_B_256_64)
-                np.save(os.path.join(self.BASE_DIR, 's31p1_idx_pair.npy'), idx_pair)
-                np.save(os.path.join(self.BASE_DIR, 's31p1_mask_1_if_proposed.npy'), mask_1_if_proposed)
-                np.save(os.path.join(self.BASE_DIR, 's31p1_mask_256_64_candidates_proposed.npy'), mask_256_64_candidates_proposed)
+                #np.save(os.path.join(self.BASE_DIR, 's31p1_sample_points_pl.npy'), sample_points_pl)
+                #np.save(os.path.join(self.BASE_DIR, 's31p1_idx_B_256_64.npy'), idx_B_256_64)
+                #np.save(os.path.join(self.BASE_DIR, 's31p1_idx_pair.npy'), idx_pair)
+                #np.save(os.path.join(self.BASE_DIR, 's31p1_mask_1_if_proposed.npy'), mask_1_if_proposed)
+                #np.save(os.path.join(self.BASE_DIR, 's31p1_mask_256_64_candidates_proposed.npy'), mask_256_64_candidates_proposed)
 
 
 
@@ -1046,9 +1046,9 @@ class NetworkTrainer:
                 mask_1_if_proposed = mask_1_if_proposed.astype(np.int32)
 
                 # visualize s31p2
-                np.save(os.path.join(self.BASE_DIR, 's31p2_labels_256_64_edge.npy'), labels_256_64_edge)
-                np.save(os.path.join(self.BASE_DIR, 's31p2_mask_1_if_edge.npy'), mask_1_if_edge)
-                np.save(os.path.join(self.BASE_DIR, 's31p2_labels_type.npy'), labels_type)
+                #np.save(os.path.join(self.BASE_DIR, 's31p2_labels_256_64_edge.npy'), labels_256_64_edge)
+                #np.save(os.path.join(self.BASE_DIR, 's31p2_mask_1_if_edge.npy'), mask_1_if_edge)
+                #np.save(os.path.join(self.BASE_DIR, 's31p2_labels_type.npy'), labels_type)
 
 
                 with self.graph_32.as_default():
@@ -1152,7 +1152,7 @@ class NetworkTrainer:
             elif self.RESUME == 1:
                 init = tf.compat.v1.global_variables_initializer()
                 self.sess_31.run(init)
-                self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_2.ckpt')
+                self.saver_31.restore(self.sess_31, self.BASE_DIR+'/stage_1_log/model_31_100.ckpt')
 
             self.train_ops_31 = {'pointclouds_pl': self.pointclouds_pl,
                 'labels_edge_p': self.labels_edge_p,
@@ -1374,7 +1374,7 @@ class NetworkTrainer:
     def eval_one_epoch_31(self):
         is_training_31 = True
         # make sure that there are 4*n matrices
-        train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '*.mat')
+        train_matrices_names_list = fnmatch.filter(os.listdir('/raid/home/hyovin.kwak/PIE-NET/main/test_data/new_test/'), '0.mat')
         matrix_num = len(train_matrices_names_list)
         permutation = np.random.permutation(matrix_num)
         # 4 matrices?
