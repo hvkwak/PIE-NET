@@ -16,8 +16,9 @@ def graphier_FPS(pts, K, ori_idx):
     """
     idx = []
     farthest_pts = np.zeros((K, 3))
-    farthest_pts[0] = pts[np.random.randint(pts.shape[0])]
-    idx.append(np.random.randint(pts.shape[0]))
+    random_init = np.random.randint(pts.shape[0])
+    farthest_pts[0] = pts[random_init]
+    idx.append(ori_idx[random_init])
     distances = calc_distances(farthest_pts[0], pts)
     for i in range(1, K):
         farthest_pts[i] = pts[np.argmax(distances)]
